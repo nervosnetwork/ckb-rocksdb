@@ -1,7 +1,7 @@
 [package]
 name = "ckb-rocksdb"
 description = "Rust wrapper for Facebook's RocksDB embeddable database"
-version = "0.21.1"
+version = "0.22.0"
 edition = "2018"
 authors = ["Tyler Neely <t@jujit.su>", "David Greenberg <dsg123456789@gmail.com>", "Nervos Core Dev <dev@nervos.org>"]
 license = "Apache-2.0"
@@ -30,8 +30,9 @@ march-native = ["librocksdb-sys/march-native"]
 
 
 [dependencies]
+home = "0.5.9"
 libc = "0.2"
-librocksdb-sys = { package = "ckb-librocksdb-sys", path = "librocksdb-sys", version = "=8.5.4" }
+librocksdb-sys = { package = "ckb-librocksdb-sys", path = "librocksdb-sys", version = "=9.10.0" }
 tempfile = "3"
 
 [dev-dependencies]
