@@ -6,6 +6,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+const RUST_TARGET: &str = "1.81.0";
+
 fn get_flags_from_detect_platform_script() -> Option<Vec<String>> {
     if !cfg!(target_os = "windows") {
         let mut cmd = Command::new("bash");
@@ -91,6 +93,7 @@ fn bindgen_rocksdb() {
         .blocklist_type("max_align_t") // https://github.com/rust-lang-nursery/rust-bindgen/issues/550
         .ctypes_prefix("libc")
         .size_t_is_usize(true)
+        .rust_target(RUST_TARGET.parse().unwrap())
         .generate()
         .expect("unable to generate rocksdb bindings");
 
@@ -198,7 +201,7 @@ fn build_rocksdb() {
             config.define("ROCKSDB_PLATFORM_POSIX", None);
             config.define("ROCKSDB_LIB_IO_POSIX", None);
         }
-        config.flag(&cxx_standard());
+        config.flag(cxx_standard());
     }
 
     if target.contains("aarch64") {
