@@ -14,7 +14,7 @@
 
 extern crate ckb_rocksdb as rocksdb;
 
-use crate::rocksdb::{prelude::*, CompactionDecision, TemporaryDBPath};
+use crate::rocksdb::{CompactionDecision, TemporaryDBPath, prelude::*};
 
 #[cfg(test)]
 #[allow(unused_variables)]
@@ -29,7 +29,7 @@ fn test_filter(level: u32, key: &[u8], value: &[u8]) -> CompactionDecision {
 
 #[test]
 fn compaction_filter_test() {
-    use crate::{Options, DB};
+    use crate::{DB, Options};
 
     let path = TemporaryDBPath::new();
     let mut opts = Options::default();

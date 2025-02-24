@@ -15,7 +15,7 @@
 extern crate ckb_rocksdb as rocksdb;
 
 use ckb_rocksdb::ops::{CompactRange, Delete, Get, Merge, Open, Put};
-use ckb_rocksdb::{DBCompactionStyle, MergeOperands, Options, TemporaryDBPath, DB};
+use ckb_rocksdb::{DB, DBCompactionStyle, MergeOperands, Options, TemporaryDBPath};
 use rocksdb::merge_operator::MergeFn;
 
 #[allow(clippy::unnecessary_wraps)]
@@ -41,7 +41,7 @@ fn test_provided_merge(
 
 #[test]
 fn merge_test() {
-    use crate::{Options, DB};
+    use crate::{DB, Options};
 
     let db_path = TemporaryDBPath::new();
     let mut opts = Options::default();
@@ -77,7 +77,9 @@ fn merge_test() {
 }
 
 unsafe fn to_slice<T: Sized>(p: &T) -> &[u8] {
-    ::std::slice::from_raw_parts((p as *const T) as *const u8, ::std::mem::size_of::<T>())
+    unsafe {
+        ::std::slice::from_raw_parts((p as *const T) as *const u8, ::std::mem::size_of::<T>())
+    }
 }
 
 fn from_slice<T: Sized>(s: &[u8]) -> Option<&T> {
@@ -313,7 +315,7 @@ fn failed_merge_test() {
     ) -> Option<Vec<u8>> {
         None
     }
-    use crate::{Options, DB};
+    use crate::{DB, Options};
 
     let db_path = TemporaryDBPath::new();
     let mut opts = Options::default();
@@ -357,7 +359,7 @@ fn make_merge_max_with_limit(limit: u64) -> impl MergeFn + Clone {
 
 #[test]
 fn test_merge_state() {
-    use {Options, DB};
+    use {DB, Options};
     let path = "_rust_rocksdb_mergetest_state";
     let mut opts = Options::default();
     opts.create_if_missing(true);

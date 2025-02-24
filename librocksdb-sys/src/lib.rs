@@ -25,7 +25,7 @@ use libc::c_int;
 #[cfg(test)]
 mod patches_tests;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub fn bz_internal_error(errcode: c_int) {
     panic!("bz internal error: {}", errcode);
 }

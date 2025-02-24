@@ -13,7 +13,7 @@
 // limitations under the License.
 //`
 
-use crate::{ffi, ffi_util::to_cpath, Error, Options};
+use crate::{Error, Options, ffi, ffi_util::to_cpath};
 
 use libc::{self, c_char, size_t};
 use std::{ffi::CString, marker::PhantomData, path::Path};
@@ -27,8 +27,8 @@ pub struct SstFileWriter<'a> {
     phantom: PhantomData<&'a Options>,
 }
 
-unsafe impl<'a> Send for SstFileWriter<'a> {}
-unsafe impl<'a> Sync for SstFileWriter<'a> {}
+unsafe impl Send for SstFileWriter<'_> {}
+unsafe impl Sync for SstFileWriter<'_> {}
 
 struct EnvOptions {
     inner: *mut ffi::rocksdb_envoptions_t,
@@ -163,7 +163,7 @@ impl<'a> SstFileWriter<'a> {
     }
 }
 
-impl<'a> Drop for SstFileWriter<'a> {
+impl Drop for SstFileWriter<'_> {
     fn drop(&mut self) {
         unsafe {
             ffi::rocksdb_sstfilewriter_destroy(self.inner);

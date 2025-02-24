@@ -17,11 +17,12 @@ use crate::ffi;
 use crate::ffi_util;
 
 use crate::{
+    ColumnFamily, Error,
     db_iterator::DBRawIterator,
     db_options::{OptionsMustOutliveDB, ReadOptions},
     handle::Handle,
     open_raw::{OpenRaw, OpenRawFFI},
-    ops, ColumnFamily, Error,
+    ops,
 };
 
 use std::collections::BTreeMap;

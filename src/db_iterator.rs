@@ -70,7 +70,7 @@ use std::slice;
 
 /// # }
 /// ```
-unsafe impl<'a> Sync for DBRawIterator<'a> {}
+unsafe impl Sync for DBRawIterator<'_> {}
 
 pub struct DBRawIterator<'a> {
     pub(crate) inner: *mut ffi::rocksdb_iterator_t,
@@ -119,7 +119,7 @@ pub struct DBIterator<'a> {
     pub(crate) just_seeked: bool,
 }
 
-unsafe impl<'a> Send for DBIterator<'a> {}
+unsafe impl Send for DBIterator<'_> {}
 
 pub enum Direction {
     Forward,
@@ -134,7 +134,7 @@ pub enum IteratorMode<'a> {
     From(&'a [u8], Direction),
 }
 
-impl<'a> DBRawIterator<'a> {
+impl DBRawIterator<'_> {
     /// Returns true if the iterator is valid.
     pub fn valid(&self) -> bool {
         unsafe { ffi::rocksdb_iter_valid(self.inner) != 0 }
@@ -355,7 +355,7 @@ impl<'a> DBRawIterator<'a> {
     }
 }
 
-impl<'a> Drop for DBRawIterator<'a> {
+impl Drop for DBRawIterator<'_> {
     fn drop(&mut self) {
         unsafe {
             ffi::rocksdb_iter_destroy(self.inner);
@@ -363,7 +363,7 @@ impl<'a> Drop for DBRawIterator<'a> {
     }
 }
 
-impl<'a> DBIterator<'a> {
+impl DBIterator<'_> {
     pub fn set_mode(&mut self, mode: IteratorMode) {
         match mode {
             IteratorMode::Start => {
@@ -392,7 +392,7 @@ impl<'a> DBIterator<'a> {
     }
 }
 
-impl<'a> Iterator for DBIterator<'a> {
+impl Iterator for DBIterator<'_> {
     type Item = KVBytes;
 
     fn next(&mut self) -> Option<KVBytes> {

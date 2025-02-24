@@ -1,1 +1,1 @@
-pub use crate::{ops::*, ColumnFamily, DBVector, Error, Options, ReadOptions, WriteOptions, DB};
+pub use crate::{ColumnFamily, DB, DBVector, Error, Options, ReadOptions, WriteOptions, ops::*};

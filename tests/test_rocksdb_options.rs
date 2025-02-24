@@ -14,7 +14,7 @@
 //
 extern crate ckb_rocksdb as rocksdb;
 
-use crate::rocksdb::{prelude::*, TemporaryDBPath};
+use crate::rocksdb::{TemporaryDBPath, prelude::*};
 
 #[test]
 fn test_set_num_levels() {

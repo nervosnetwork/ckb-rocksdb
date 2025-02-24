@@ -1,7 +1,7 @@
 extern crate ckb_rocksdb as rocksdb;
 
 use crate::rocksdb::{
-    prelude::*, ColumnFamilyDescriptor, DBWithTTL, TTLOpenDescriptor, TemporaryDBPath,
+    ColumnFamilyDescriptor, DBWithTTL, TTLOpenDescriptor, TemporaryDBPath, prelude::*,
 };
 
 #[test]

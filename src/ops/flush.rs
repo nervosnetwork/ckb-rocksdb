@@ -1,5 +1,5 @@
 use crate::ffi;
-use crate::{handle::Handle, ColumnFamily, Error, FlushOptions};
+use crate::{ColumnFamily, Error, FlushOptions, handle::Handle};
 
 pub trait Flush {
     //// Flushes database memtables to SST files on the disk.

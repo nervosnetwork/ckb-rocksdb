@@ -1,4 +1,5 @@
 use crate::{
+    ColumnFamily, DBRawIterator, Error, Options, ReadOptions, Transaction, WriteOptions,
     db_options::OptionsMustOutliveDB,
     db_vector::DBVector,
     ffi_util::to_cstring,
@@ -6,7 +7,6 @@ use crate::{
     open_raw::{OpenRaw, OpenRawFFI},
     ops::*,
     write_batch::WriteBatch,
-    ColumnFamily, DBRawIterator, Error, Options, ReadOptions, Transaction, WriteOptions,
 };
 
 use crate::ffi;
@@ -280,9 +280,11 @@ impl Default for TransactionOptions {
 
 impl CreateCheckpointObject for TransactionDB {
     unsafe fn create_checkpoint_object_raw(&self) -> Result<*mut ffi::rocksdb_checkpoint_t, Error> {
-        Ok(ffi_try!(
-            ffi::rocksdb_transactiondb_checkpoint_object_create(self.inner,)
-        ))
+        unsafe {
+            Ok(ffi_try!(
+                ffi::rocksdb_transactiondb_checkpoint_object_create(self.inner,)
+            ))
+        }
     }
 }
 
@@ -609,15 +611,15 @@ pub struct Snapshot<'a> {
     inner: *const ffi::rocksdb_snapshot_t,
 }
 
-impl<'a> ConstHandle<ffi::rocksdb_snapshot_t> for Snapshot<'a> {
+impl ConstHandle<ffi::rocksdb_snapshot_t> for Snapshot<'_> {
     fn const_handle(&self) -> *const ffi::rocksdb_snapshot_t {
         self.inner
     }
 }
 
-impl<'a> Read for Snapshot<'a> {}
+impl Read for Snapshot<'_> {}
 
-impl<'a> GetCF<ReadOptions> for Snapshot<'a> {
+impl GetCF<ReadOptions> for Snapshot<'_> {
     fn get_cf_full<K: AsRef<[u8]>>(
         &self,
         cf: Option<&ColumnFamily>,
@@ -631,7 +633,7 @@ impl<'a> GetCF<ReadOptions> for Snapshot<'a> {
     }
 }
 
-impl<'a> MultiGet<ReadOptions> for Snapshot<'a> {
+impl MultiGet<ReadOptions> for Snapshot<'_> {
     fn multi_get_full<K, I>(
         &self,
         keys: I,
@@ -648,7 +650,7 @@ impl<'a> MultiGet<ReadOptions> for Snapshot<'a> {
     }
 }
 
-impl<'a> MultiGetCF<ReadOptions> for Snapshot<'a> {
+impl MultiGetCF<ReadOptions> for Snapshot<'_> {
     fn multi_get_cf_full<'m, K, I>(
         &self,
         keys: I,
@@ -665,7 +667,7 @@ impl<'a> MultiGetCF<ReadOptions> for Snapshot<'a> {
     }
 }
 
-impl<'a> Drop for Snapshot<'a> {
+impl Drop for Snapshot<'_> {
     fn drop(&mut self) {
         unsafe {
             ffi::rocksdb_transactiondb_release_snapshot(self.db.inner, self.inner);

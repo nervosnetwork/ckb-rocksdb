@@ -14,7 +14,7 @@
 
 extern crate ckb_rocksdb as rocksdb;
 
-use crate::rocksdb::{prelude::*, ReadOnlyDB, TemporaryDBPath};
+use crate::rocksdb::{ReadOnlyDB, TemporaryDBPath, prelude::*};
 
 #[test]
 fn open_existing_db_in_read_only() {

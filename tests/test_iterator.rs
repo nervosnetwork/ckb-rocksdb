@@ -14,7 +14,7 @@
 //
 extern crate ckb_rocksdb as rocksdb;
 
-use crate::rocksdb::{prelude::*, Direction, IteratorMode, MemtableFactory, TemporaryDBPath};
+use crate::rocksdb::{Direction, IteratorMode, MemtableFactory, TemporaryDBPath, prelude::*};
 
 fn cba(input: &[u8]) -> Box<[u8]> {
     input.to_vec().into_boxed_slice()

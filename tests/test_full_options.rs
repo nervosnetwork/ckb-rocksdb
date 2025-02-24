@@ -14,7 +14,7 @@
 
 extern crate ckb_rocksdb as rocksdb;
 
-use crate::rocksdb::{prelude::*, FullOptions, TemporaryDBPath, DB};
+use crate::rocksdb::{DB, FullOptions, TemporaryDBPath, prelude::*};
 
 #[test]
 fn test_options_load_from_file() {

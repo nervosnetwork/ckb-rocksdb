@@ -1,5 +1,5 @@
 use crate::ffi;
-use crate::{checkpoint::Checkpoint, handle::Handle, Error};
+use crate::{Error, checkpoint::Checkpoint, handle::Handle};
 use std::marker::PhantomData;
 
 pub trait CreateCheckpointObject {
@@ -25,8 +25,10 @@ where
     T: Handle<ffi::rocksdb_t>,
 {
     unsafe fn create_checkpoint_object_raw(&self) -> Result<*mut ffi::rocksdb_checkpoint_t, Error> {
-        Ok(ffi_try!(ffi::rocksdb_checkpoint_object_create(
-            self.handle(),
-        )))
+        unsafe {
+            Ok(ffi_try!(ffi::rocksdb_checkpoint_object_create(
+                self.handle(),
+            )))
+        }
     }
 }

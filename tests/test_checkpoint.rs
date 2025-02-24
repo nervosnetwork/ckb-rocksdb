@@ -14,7 +14,7 @@
 //
 extern crate ckb_rocksdb as rocksdb;
 
-use crate::rocksdb::{checkpoint::Checkpoint, prelude::*, TemporaryDBPath};
+use crate::rocksdb::{TemporaryDBPath, checkpoint::Checkpoint, prelude::*};
 
 #[test]
 pub fn test_single_checkpoint() {

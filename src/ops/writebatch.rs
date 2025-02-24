@@ -1,10 +1,10 @@
 use crate::ffi;
 
-use crate::{handle::Handle, Error, WriteBatch, WriteOptions};
+use crate::{Error, WriteBatch, WriteOptions, handle::Handle};
 
 pub trait WriteOps {
     fn write_full(&self, batch: &WriteBatch, writeopts: Option<&WriteOptions>)
-        -> Result<(), Error>;
+    -> Result<(), Error>;
 
     fn write(&self, batch: &WriteBatch) -> Result<(), Error> {
         self.write_full(batch, None)
