@@ -23,7 +23,7 @@ use std::mem;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
-use crate::{db_options::OptionsMustOutliveDB, ColumnFamilyDescriptor, Error, Options};
+use crate::{ColumnFamilyDescriptor, Error, Options, db_options::OptionsMustOutliveDB};
 
 pub struct OpenRawInput<'a, T> {
     pub(crate) options: &'a Options,

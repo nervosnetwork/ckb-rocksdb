@@ -1,6 +1,6 @@
 use crate::ffi;
 
-use crate::{ffi_util::to_cstring, handle::Handle, ColumnFamily, Error, Options};
+use crate::{ColumnFamily, Error, Options, ffi_util::to_cstring, handle::Handle};
 
 use std::collections::BTreeMap;
 

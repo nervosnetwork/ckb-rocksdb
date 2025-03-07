@@ -1,11 +1,11 @@
 use crate::{
+    ColumnFamily, Error, OptimisticTransaction, Options, WriteOptions,
     db_iterator::DBRawIterator,
     db_options::{OptionsMustOutliveDB, ReadOptions},
     db_vector::DBVector,
     handle::{ConstHandle, Handle},
     open_raw::{OpenRaw, OpenRawFFI},
     ops::*,
-    ColumnFamily, Error, OptimisticTransaction, Options, WriteOptions,
 };
 
 use crate::ffi;
@@ -265,15 +265,15 @@ pub struct Snapshot<'a> {
     inner: *const ffi::rocksdb_snapshot_t,
 }
 
-impl<'a> ConstHandle<ffi::rocksdb_snapshot_t> for Snapshot<'a> {
+impl ConstHandle<ffi::rocksdb_snapshot_t> for Snapshot<'_> {
     fn const_handle(&self) -> *const ffi::rocksdb_snapshot_t {
         self.inner
     }
 }
 
-impl<'a> Read for Snapshot<'a> {}
+impl Read for Snapshot<'_> {}
 
-impl<'a> GetCF<ReadOptions> for Snapshot<'a> {
+impl GetCF<ReadOptions> for Snapshot<'_> {
     fn get_cf_full<K: AsRef<[u8]>>(
         &self,
         cf: Option<&ColumnFamily>,
@@ -287,7 +287,7 @@ impl<'a> GetCF<ReadOptions> for Snapshot<'a> {
     }
 }
 
-impl<'a> MultiGet<ReadOptions> for Snapshot<'a> {
+impl MultiGet<ReadOptions> for Snapshot<'_> {
     fn multi_get_full<K, I>(
         &self,
         keys: I,
@@ -304,7 +304,7 @@ impl<'a> MultiGet<ReadOptions> for Snapshot<'a> {
     }
 }
 
-impl<'a> MultiGetCF<ReadOptions> for Snapshot<'a> {
+impl MultiGetCF<ReadOptions> for Snapshot<'_> {
     fn multi_get_cf_full<'m, K, I>(
         &self,
         keys: I,
@@ -321,7 +321,7 @@ impl<'a> MultiGetCF<ReadOptions> for Snapshot<'a> {
     }
 }
 
-impl<'a> Drop for Snapshot<'a> {
+impl Drop for Snapshot<'_> {
     fn drop(&mut self) {
         unsafe {
             ffi::rocksdb_release_snapshot(self.db.base_db, self.inner);

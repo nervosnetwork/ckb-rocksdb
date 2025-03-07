@@ -16,11 +16,12 @@
 use crate::ffi;
 
 use crate::{
+    ColumnFamily, Error,
     db_iterator::DBRawIterator,
     db_options::{OptionsMustOutliveDB, ReadOptions},
     handle::Handle,
     open_raw::{OpenRaw, OpenRawFFI},
-    ops, ColumnFamily, Error,
+    ops,
 };
 
 use libc::c_uchar;

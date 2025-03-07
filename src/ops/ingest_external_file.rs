@@ -1,6 +1,6 @@
 use crate::ffi;
 use crate::ffi_util::to_cpath;
-use crate::{handle::Handle, ColumnFamily, Error, IngestExternalFileOptions};
+use crate::{ColumnFamily, Error, IngestExternalFileOptions, handle::Handle};
 use std::ffi::CString;
 use std::path::Path;
 

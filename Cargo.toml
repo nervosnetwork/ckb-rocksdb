@@ -1,8 +1,8 @@
 [package]
 name = "ckb-rocksdb"
 description = "Rust wrapper for Facebook's RocksDB embeddable database"
-version = "0.22.0"
-edition = "2018"
+version = "0.22.1"
+edition = "2024"
 authors = ["Tyler Neely <t@jujit.su>", "David Greenberg <dsg123456789@gmail.com>", "Nervos Core Dev <dev@nervos.org>"]
 license = "Apache-2.0"
 keywords = ["database", "embedded", "LSM-tree", "persistence"]
@@ -14,6 +14,7 @@ exclude = [
     "*.md",
     "benches",
 ]
+rust-version = "1.85.0"
 
 [features]
 default = ["snappy", "lz4", "zstd", "zlib", "bzip2"]
@@ -27,13 +28,14 @@ jemalloc = ["librocksdb-sys/jemalloc"]
 io-uring = ["librocksdb-sys/io-uring"]
 portable = ["librocksdb-sys/portable"]
 march-native = ["librocksdb-sys/march-native"]
-
+serde1 = ["serde"]
 
 [dependencies]
-home = "0.5.9"
+home = "0.5"
 libc = "0.2"
-librocksdb-sys = { package = "ckb-librocksdb-sys", path = "librocksdb-sys", version = "=9.10.0" }
+librocksdb-sys = { package = "ckb-librocksdb-sys", path = "librocksdb-sys", version = "=9.10.1" }
 tempfile = "3"
+serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
 trybuild = "1.0"

@@ -14,7 +14,7 @@
 //
 
 use std::path::{Path, PathBuf};
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 /// Ensures that DB::Destroy is called and the directory is deleted
 /// for this database when TemporaryDBPath is dropped.

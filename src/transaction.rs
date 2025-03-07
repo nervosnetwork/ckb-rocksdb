@@ -1,9 +1,8 @@
 use crate::ffi;
 use crate::{
-    ffi_util,
+    ColumnFamily, DBPinnableSlice, DBRawIterator, DBVector, Error, ReadOptions, ffi_util,
     handle::{ConstHandle, Handle},
     ops::*,
-    ColumnFamily, DBPinnableSlice, DBRawIterator, DBVector, Error, ReadOptions,
 };
 use libc::{c_char, c_uchar, c_void, size_t};
 use std::marker::PhantomData;
@@ -135,7 +134,7 @@ impl<'a, T> Transaction<'a, T> {
     }
 }
 
-impl<'a, T> Drop for Transaction<'a, T> {
+impl<T> Drop for Transaction<'_, T> {
     fn drop(&mut self) {
         unsafe {
             ffi::rocksdb_transaction_destroy(self.inner);
@@ -143,13 +142,13 @@ impl<'a, T> Drop for Transaction<'a, T> {
     }
 }
 
-impl<'a, T> Handle<ffi::rocksdb_transaction_t> for Transaction<'a, T> {
+impl<T> Handle<ffi::rocksdb_transaction_t> for Transaction<'_, T> {
     fn handle(&self) -> *mut ffi::rocksdb_transaction_t {
         self.inner
     }
 }
 
-impl<'a, T> Read for Transaction<'a, T> {}
+impl<T> Read for Transaction<'_, T> {}
 
 impl<'a, T> GetCF<ReadOptions> for Transaction<'a, T>
 where
@@ -345,13 +344,13 @@ pub struct TransactionSnapshot<'a, T> {
     inner: *const ffi::rocksdb_snapshot_t,
 }
 
-impl<'a, T> ConstHandle<ffi::rocksdb_snapshot_t> for TransactionSnapshot<'a, T> {
+impl<T> ConstHandle<ffi::rocksdb_snapshot_t> for TransactionSnapshot<'_, T> {
     fn const_handle(&self) -> *const ffi::rocksdb_snapshot_t {
         self.inner
     }
 }
 
-impl<'a, T> Read for TransactionSnapshot<'a, T> {}
+impl<T> Read for TransactionSnapshot<'_, T> {}
 
 impl<'a, T> GetCF<ReadOptions> for TransactionSnapshot<'a, T>
 where
@@ -407,7 +406,7 @@ where
     }
 }
 
-impl<'a, T> PutCF<()> for Transaction<'a, T> {
+impl<T> PutCF<()> for Transaction<'_, T> {
     fn put_cf_full<K, V>(
         &self,
         cf: Option<&ColumnFamily>,
@@ -450,7 +449,7 @@ impl<'a, T> PutCF<()> for Transaction<'a, T> {
     }
 }
 
-impl<'a, T> MergeCF<()> for Transaction<'a, T> {
+impl<T> MergeCF<()> for Transaction<'_, T> {
     fn merge_cf_full<K, V>(
         &self,
         cf: Option<&ColumnFamily>,
@@ -493,7 +492,7 @@ impl<'a, T> MergeCF<()> for Transaction<'a, T> {
     }
 }
 
-impl<'a, T> DeleteCF<()> for Transaction<'a, T> {
+impl<T> DeleteCF<()> for Transaction<'_, T> {
     fn delete_cf_full<K>(
         &self,
         cf: Option<&ColumnFamily>,
@@ -527,7 +526,7 @@ impl<'a, T> DeleteCF<()> for Transaction<'a, T> {
     }
 }
 
-impl<'a, T> Drop for TransactionSnapshot<'a, T> {
+impl<T> Drop for TransactionSnapshot<'_, T> {
     fn drop(&mut self) {
         unsafe {
             ffi::rocksdb_free(self.inner as *mut c_void);

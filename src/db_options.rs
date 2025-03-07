@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use crate::{
-    handle::{ConstHandle, Handle},
     Error,
+    handle::{ConstHandle, Handle},
 };
 
 use std::ffi::{CStr, CString};
@@ -28,7 +28,7 @@ use crate::compaction_filter_factory::{self, CompactionFilterFactory};
 use crate::comparator::{self, ComparatorCallback, CompareFn};
 use crate::ffi;
 use crate::merge_operator::{
-    self, full_merge_callback, partial_merge_callback, MergeFn, MergeOperatorCallback,
+    self, MergeFn, MergeOperatorCallback, full_merge_callback, partial_merge_callback,
 };
 use crate::slice_transform::SliceTransform;
 use std::ptr::NonNull;
@@ -234,7 +234,7 @@ impl OptionsMustOutliveDB {
     pub(crate) fn clone(&self) -> Self {
         Self {
             env: self.env.as_ref().map(Env::clone),
-            row_cache: self.row_cache.as_ref().map(Cache::clone),
+            row_cache: self.row_cache.clone(),
             block_based: self
                 .block_based
                 .as_ref()
@@ -251,7 +251,7 @@ pub(crate) struct BlockBasedOptionsMustOutliveDB {
 impl BlockBasedOptionsMustOutliveDB {
     fn clone(&self) -> Self {
         Self {
-            block_cache: self.block_cache.as_ref().map(Cache::clone),
+            block_cache: self.block_cache.clone(),
         }
     }
 }

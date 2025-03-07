@@ -1,5 +1,5 @@
 use super::columnfamily::GetColumnFamilys;
-use crate::{ffi_util::opt_bytes_to_ptr, handle::Handle, ColumnFamily};
+use crate::{ColumnFamily, ffi_util::opt_bytes_to_ptr, handle::Handle};
 use libc::size_t;
 
 pub trait CompactRange {

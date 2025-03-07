@@ -1,4 +1,4 @@
-use crate::{handle::Handle, ColumnFamily, Error};
+use crate::{ColumnFamily, Error, handle::Handle};
 use libc::{c_char, c_void};
 use std::ffi::{CStr, CString};
 

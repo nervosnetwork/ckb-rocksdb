@@ -17,12 +17,12 @@ use crate::ffi;
 use crate::ffi_util::to_cpath;
 
 use crate::{
+    ColumnFamily, DBRawIterator, Error, Options, ReadOptions, Snapshot,
     db_options::OptionsMustOutliveDB,
     handle::Handle,
     open_raw::{OpenRaw, OpenRawFFI},
     ops,
     ops::*,
-    ColumnFamily, DBRawIterator, Error, Options, ReadOptions, Snapshot,
 };
 
 use std::collections::BTreeMap;
@@ -234,7 +234,7 @@ fn test_db_vector() {
 
 #[test]
 fn external() {
-    use crate::{prelude::*, TemporaryDBPath};
+    use crate::{TemporaryDBPath, prelude::*};
 
     let path = TemporaryDBPath::new();
     {
@@ -250,7 +250,7 @@ fn external() {
 
 #[test]
 fn errors_do_stuff() {
-    use crate::{prelude::*, TemporaryDBPath};
+    use crate::{TemporaryDBPath, prelude::*};
 
     let path = TemporaryDBPath::new();
     {
@@ -270,7 +270,7 @@ fn errors_do_stuff() {
 
 #[test]
 fn writebatch_works() {
-    use crate::{prelude::*, TemporaryDBPath, WriteBatch};
+    use crate::{TemporaryDBPath, WriteBatch, prelude::*};
 
     let path = TemporaryDBPath::new();
     {
@@ -326,7 +326,7 @@ fn writebatch_works() {
 
 #[test]
 fn iterator_test() {
-    use crate::{prelude::*, IteratorMode, TemporaryDBPath};
+    use crate::{IteratorMode, TemporaryDBPath, prelude::*};
     use std::str;
 
     let path = TemporaryDBPath::new();
@@ -351,7 +351,7 @@ fn iterator_test() {
 
 #[test]
 fn snapshot_test() {
-    use crate::{prelude::*, TemporaryDBPath};
+    use crate::{TemporaryDBPath, prelude::*};
 
     let path = TemporaryDBPath::new();
     {
@@ -373,32 +373,38 @@ fn snapshot_test() {
 
 #[test]
 fn set_option_test() {
-    use crate::{prelude::*, TemporaryDBPath};
+    use crate::{TemporaryDBPath, prelude::*};
 
     let path = TemporaryDBPath::new();
     {
         let db = DB::open_default(&path).unwrap();
         // set an option to valid values
-        assert!(db
-            .set_options(&[("disable_auto_compactions", "true")])
-            .is_ok());
-        assert!(db
-            .set_options(&[("disable_auto_compactions", "false")])
-            .is_ok());
+        assert!(
+            db.set_options(&[("disable_auto_compactions", "true")])
+                .is_ok()
+        );
+        assert!(
+            db.set_options(&[("disable_auto_compactions", "false")])
+                .is_ok()
+        );
         // invalid names/values should result in an error
-        assert!(db
-            .set_options(&[("disable_auto_compactions", "INVALID_VALUE")])
-            .is_err());
-        assert!(db
-            .set_options(&[("INVALID_NAME", "INVALID_VALUE")])
-            .is_err());
+        assert!(
+            db.set_options(&[("disable_auto_compactions", "INVALID_VALUE")])
+                .is_err()
+        );
+        assert!(
+            db.set_options(&[("INVALID_NAME", "INVALID_VALUE")])
+                .is_err()
+        );
         // option names/values must not contain NULLs
-        assert!(db
-            .set_options(&[("disable_auto_compactions", "true\0")])
-            .is_err());
-        assert!(db
-            .set_options(&[("disable_auto_compactions\0", "true")])
-            .is_err());
+        assert!(
+            db.set_options(&[("disable_auto_compactions", "true\0")])
+                .is_err()
+        );
+        assert!(
+            db.set_options(&[("disable_auto_compactions\0", "true")])
+                .is_err()
+        );
         // empty options are not allowed
         assert!(db.set_options(&[]).is_err());
         // multiple options can be set in a single API call

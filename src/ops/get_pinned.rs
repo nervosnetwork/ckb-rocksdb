@@ -16,7 +16,7 @@
 use crate::ffi;
 use libc::{c_char, size_t};
 
-use crate::{handle::Handle, ColumnFamily, DBPinnableSlice, Error, ReadOptions};
+use crate::{ColumnFamily, DBPinnableSlice, Error, ReadOptions, handle::Handle};
 
 pub trait GetPinned<'a> {
     type ReadOptions;

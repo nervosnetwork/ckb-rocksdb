@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 
-use crate::{ffi, Error, DB};
+use crate::{DB, Error, ffi};
 
 use libc::{c_int, c_uchar};
 use std::ffi::CString;
@@ -323,8 +323,8 @@ impl Drop for RestoreOptions {
 
 #[test]
 fn restore_from_latest() {
-    use crate::ops::{Get, Open, Put};
     use crate::TemporaryDBPath;
+    use crate::ops::{Get, Open, Put};
 
     // create backup
     let path = TemporaryDBPath::new();
@@ -366,8 +366,8 @@ fn restore_from_latest() {
 
 #[test]
 fn restore_from_backup() {
-    use crate::ops::{Get, Open, Put};
     use crate::TemporaryDBPath;
+    use crate::ops::{Get, Open, Put};
 
     // create backup
     let path = TemporaryDBPath::new();
@@ -391,7 +391,7 @@ fn restore_from_backup() {
                 assert!(i.size > 0);
             });
 
-            let backup_id = info.get(0).unwrap().backup_id;
+            let backup_id = info.first().unwrap().backup_id;
             let mut restore_option = RestoreOptions::default();
             restore_option.set_keep_log_files(false); // true to keep log files
             let restore_status = backup_engine.restore_from_backup(

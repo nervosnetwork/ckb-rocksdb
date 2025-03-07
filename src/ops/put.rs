@@ -16,7 +16,7 @@
 use crate::ffi;
 use libc::{c_char, size_t};
 
-use crate::{handle::Handle, ColumnFamily, Error, WriteOptions};
+use crate::{ColumnFamily, Error, WriteOptions, handle::Handle};
 
 pub trait Put<W> {
     fn put_full<K, V>(&self, key: K, value: V, writeopts: Option<&W>) -> Result<(), Error>

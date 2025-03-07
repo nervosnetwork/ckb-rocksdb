@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{handle::Handle, ColumnFamily, Options};
+use crate::{ColumnFamily, Options, handle::Handle};
 
 /// A descriptor for a RocksDB column family.
 ///

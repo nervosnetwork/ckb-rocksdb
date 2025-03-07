@@ -18,7 +18,7 @@ use crate::ops::*;
 /// Implementation of bindings to RocksDB Checkpoint[1] API
 ///
 /// [1]: https://github.com/facebook/rocksdb/wiki/Checkpoints
-use crate::{Error, DB};
+use crate::{DB, Error};
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -66,7 +66,7 @@ impl<'db> Checkpoint<'db> {
     }
 }
 
-impl<'db> Drop for Checkpoint<'db> {
+impl Drop for Checkpoint<'_> {
     fn drop(&mut self) {
         unsafe {
             ffi::rocksdb_checkpoint_object_destroy(self.inner);

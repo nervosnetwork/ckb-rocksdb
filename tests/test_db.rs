@@ -15,7 +15,7 @@
 extern crate ckb_rocksdb as rocksdb;
 use libc::size_t;
 
-use crate::rocksdb::{prelude::*, IteratorMode, TemporaryDBPath, WriteBatch};
+use crate::rocksdb::{IteratorMode, TemporaryDBPath, WriteBatch, prelude::*};
 
 #[test]
 fn test_db_vector() {
@@ -163,26 +163,32 @@ fn set_option_test() {
     {
         let db = DB::open_default(&path).unwrap();
         // set an option to valid values
-        assert!(db
-            .set_options(&[("disable_auto_compactions", "true")])
-            .is_ok());
-        assert!(db
-            .set_options(&[("disable_auto_compactions", "false")])
-            .is_ok());
+        assert!(
+            db.set_options(&[("disable_auto_compactions", "true")])
+                .is_ok()
+        );
+        assert!(
+            db.set_options(&[("disable_auto_compactions", "false")])
+                .is_ok()
+        );
         // invalid names/values should result in an error
-        assert!(db
-            .set_options(&[("disable_auto_compactions", "INVALID_VALUE")])
-            .is_err());
-        assert!(db
-            .set_options(&[("INVALID_NAME", "INVALID_VALUE")])
-            .is_err());
+        assert!(
+            db.set_options(&[("disable_auto_compactions", "INVALID_VALUE")])
+                .is_err()
+        );
+        assert!(
+            db.set_options(&[("INVALID_NAME", "INVALID_VALUE")])
+                .is_err()
+        );
         // option names/values must not contain NULLs
-        assert!(db
-            .set_options(&[("disable_auto_compactions", "true\0")])
-            .is_err());
-        assert!(db
-            .set_options(&[("disable_auto_compactions\0", "true")])
-            .is_err());
+        assert!(
+            db.set_options(&[("disable_auto_compactions", "true\0")])
+                .is_err()
+        );
+        assert!(
+            db.set_options(&[("disable_auto_compactions\0", "true")])
+                .is_err()
+        );
         // empty options are not allowed
         assert!(db.set_options(&[]).is_err());
         // multiple options can be set in a single API call
@@ -204,26 +210,32 @@ fn set_option_cf_test() {
         let db = DB::open_cf(&opts, &path, ["cf1"]).unwrap();
         let cf1 = db.cf_handle("cf1").unwrap();
         // set an option to valid values
-        assert!(db
-            .set_options_cf(cf1, &[("disable_auto_compactions", "true")])
-            .is_ok());
-        assert!(db
-            .set_options_cf(cf1, &[("disable_auto_compactions", "false")])
-            .is_ok());
+        assert!(
+            db.set_options_cf(cf1, &[("disable_auto_compactions", "true")])
+                .is_ok()
+        );
+        assert!(
+            db.set_options_cf(cf1, &[("disable_auto_compactions", "false")])
+                .is_ok()
+        );
         // invalid names/values should result in an error
-        assert!(db
-            .set_options_cf(cf1, &[("disable_auto_compactions", "INVALID_VALUE")])
-            .is_err());
-        assert!(db
-            .set_options_cf(cf1, &[("INVALID_NAME", "INVALID_VALUE")])
-            .is_err());
+        assert!(
+            db.set_options_cf(cf1, &[("disable_auto_compactions", "INVALID_VALUE")])
+                .is_err()
+        );
+        assert!(
+            db.set_options_cf(cf1, &[("INVALID_NAME", "INVALID_VALUE")])
+                .is_err()
+        );
         // option names/values must not contain NULLs
-        assert!(db
-            .set_options_cf(cf1, &[("disable_auto_compactions", "true\0")])
-            .is_err());
-        assert!(db
-            .set_options_cf(cf1, &[("disable_auto_compactions\0", "true")])
-            .is_err());
+        assert!(
+            db.set_options_cf(cf1, &[("disable_auto_compactions", "true\0")])
+                .is_err()
+        );
+        assert!(
+            db.set_options_cf(cf1, &[("disable_auto_compactions\0", "true")])
+                .is_err()
+        );
         // empty options are not allowed
         assert!(db.set_options_cf(cf1, &[]).is_err());
         // multiple options can be set in a single API call

@@ -2,11 +2,12 @@ use crate::ffi;
 use crate::ffi_util::to_cstring;
 use crate::ops::GetColumnFamilys;
 use crate::{
+    ColumnFamily, Error, Options,
     db_iterator::DBRawIterator,
     db_options::{OptionsMustOutliveDB, ReadOptions},
     handle::Handle,
     open_raw::{OpenRaw, OpenRawFFI},
-    ops, ColumnFamily, Error, Options,
+    ops,
 };
 use std::collections::BTreeMap;
 use std::fmt;

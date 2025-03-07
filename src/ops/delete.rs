@@ -16,7 +16,7 @@
 use crate::ffi;
 use libc::{c_char, size_t};
 
-use crate::{handle::Handle, ColumnFamily, Error, WriteOptions};
+use crate::{ColumnFamily, Error, WriteOptions, handle::Handle};
 
 pub trait Delete<W> {
     fn delete_full<K>(&self, key: K, writeopts: Option<&W>) -> Result<(), Error>

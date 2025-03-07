@@ -15,7 +15,7 @@
 
 use crate::ffi;
 
-use crate::{handle::Handle, ColumnFamily, Error};
+use crate::{ColumnFamily, Error, handle::Handle};
 
 use libc::{c_char, size_t};
 

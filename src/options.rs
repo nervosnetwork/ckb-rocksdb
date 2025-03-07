@@ -15,8 +15,9 @@
 use std::{ffi::CStr, path};
 
 use crate::{
+    ColumnFamilyDescriptor, Error, Options,
     db_options::{Cache, OptionsMustOutliveDB},
-    ffi, ffi_util, ColumnFamilyDescriptor, Error, Options,
+    ffi, ffi_util,
 };
 
 #[derive(Clone)]

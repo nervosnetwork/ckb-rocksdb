@@ -1,8 +1,8 @@
 extern crate ckb_rocksdb as rocksdb;
 
 use crate::rocksdb::{
-    prelude::*, MergeOperands, OptimisticTransaction, OptimisticTransactionDB,
-    OptimisticTransactionOptions, Options, TemporaryDBPath, WriteBatch, WriteOptions,
+    MergeOperands, OptimisticTransaction, OptimisticTransactionDB, OptimisticTransactionOptions,
+    Options, TemporaryDBPath, WriteBatch, WriteOptions, prelude::*,
 };
 use std::sync::Arc;
 use std::thread;

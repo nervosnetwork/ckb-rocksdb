@@ -1,5 +1,5 @@
-use ckb_rocksdb::{prelude::*, OptimisticTransactionDB, TemporaryDBPath};
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use ckb_rocksdb::{OptimisticTransactionDB, TemporaryDBPath, prelude::*};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 
 const BIG_VALUE: [u8; 1024] = [0u8; 1024];
 const NUM: u64 = 10000;

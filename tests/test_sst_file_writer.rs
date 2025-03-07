@@ -1,6 +1,6 @@
 extern crate ckb_rocksdb as rocksdb;
 
-use crate::rocksdb::{prelude::*, TemporaryDBPath};
+use crate::rocksdb::{TemporaryDBPath, prelude::*};
 use rocksdb::SstFileWriter;
 
 #[test]

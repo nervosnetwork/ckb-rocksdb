@@ -1,9 +1,8 @@
 use crate::ffi;
 use crate::{
-    ffi_util,
+    ColumnFamily, DBPinnableSlice, DBRawIterator, DBVector, Error, ReadOptions, ffi_util,
     handle::{ConstHandle, Handle},
     ops::*,
-    ColumnFamily, DBPinnableSlice, DBRawIterator, DBVector, Error, ReadOptions,
 };
 use libc::{c_char, c_uchar, c_void, size_t};
 use std::marker::PhantomData;
@@ -456,18 +455,18 @@ pub struct OptimisticTransactionSnapshot<'a> {
     inner: *const ffi::rocksdb_snapshot_t,
 }
 
-unsafe impl<'a> Send for OptimisticTransactionSnapshot<'a> {}
-unsafe impl<'a> Sync for OptimisticTransactionSnapshot<'a> {}
+unsafe impl Send for OptimisticTransactionSnapshot<'_> {}
+unsafe impl Sync for OptimisticTransactionSnapshot<'_> {}
 
-impl<'a> ConstHandle<ffi::rocksdb_snapshot_t> for OptimisticTransactionSnapshot<'a> {
+impl ConstHandle<ffi::rocksdb_snapshot_t> for OptimisticTransactionSnapshot<'_> {
     fn const_handle(&self) -> *const ffi::rocksdb_snapshot_t {
         self.inner
     }
 }
 
-impl<'a> Read for OptimisticTransactionSnapshot<'a> {}
+impl Read for OptimisticTransactionSnapshot<'_> {}
 
-impl<'a> GetCF<ReadOptions> for OptimisticTransactionSnapshot<'a> {
+impl GetCF<ReadOptions> for OptimisticTransactionSnapshot<'_> {
     fn get_cf_full<K: AsRef<[u8]>>(
         &self,
         cf: Option<&ColumnFamily>,
@@ -480,7 +479,7 @@ impl<'a> GetCF<ReadOptions> for OptimisticTransactionSnapshot<'a> {
     }
 }
 
-impl<'a> MultiGet<ReadOptions> for OptimisticTransactionSnapshot<'a> {
+impl MultiGet<ReadOptions> for OptimisticTransactionSnapshot<'_> {
     fn multi_get_full<K, I>(
         &self,
         keys: I,
@@ -496,7 +495,7 @@ impl<'a> MultiGet<ReadOptions> for OptimisticTransactionSnapshot<'a> {
     }
 }
 
-impl<'a> MultiGetCF<ReadOptions> for OptimisticTransactionSnapshot<'a> {
+impl MultiGetCF<ReadOptions> for OptimisticTransactionSnapshot<'_> {
     fn multi_get_cf_full<'m, K, I>(
         &self,
         keys: I,
@@ -512,7 +511,7 @@ impl<'a> MultiGetCF<ReadOptions> for OptimisticTransactionSnapshot<'a> {
     }
 }
 
-impl<'a> Drop for OptimisticTransactionSnapshot<'a> {
+impl Drop for OptimisticTransactionSnapshot<'_> {
     fn drop(&mut self) {
         unsafe {
             ffi::rocksdb_free(self.inner as *mut c_void);
