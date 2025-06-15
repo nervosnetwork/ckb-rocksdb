@@ -11,6 +11,7 @@ pub trait Flush {
     }
 }
 
+#[allow(dead_code)]
 pub trait FlushCF {
     /// Flushes database memtables to SST files on the disk for a given column family.
     fn flush_cf_opt(&self, cf: &ColumnFamily, flushopts: &FlushOptions) -> Result<(), Error>;

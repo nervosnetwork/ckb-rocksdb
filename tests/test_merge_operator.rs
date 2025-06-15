@@ -96,7 +96,7 @@ fn from_slice<T: Sized>(s: &[u8]) -> Option<&T> {
     }
 }
 
-#[repr(packed)]
+#[repr(Rust, packed)]
 #[derive(Copy, Clone, Debug, Default)]
 struct ValueCounts {
     num_a: u32,

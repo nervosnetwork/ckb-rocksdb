@@ -67,7 +67,7 @@ use std::slice;
 ///     println!("Saw {:?} {:?}", iter.key(), iter.value());
 ///     iter.prev();
 /// }
-
+///
 /// # }
 /// ```
 unsafe impl Sync for DBRawIterator<'_> {}
@@ -83,11 +83,11 @@ pub struct DBRawIterator<'a> {
 /// ```
 /// use ckb_rocksdb::{prelude::*, Direction, IteratorMode};
 /// # use ckb_rocksdb::TemporaryDBPath;
-
+///
 /// let path = "_path_for_rocksdb_storage2";
 /// # let path = TemporaryDBPath::new();
 /// # {
-
+///
 /// let db = DB::open_default(&path).unwrap();
 /// let mut iter = db.iterator(IteratorMode::Start); // Always iterates forward
 /// for (key, value) in iter {
@@ -110,7 +110,7 @@ pub struct DBRawIterator<'a> {
 /// for (key, value) in iter {
 ///     println!("Saw {:?} {:?}", key, value);
 /// }
-
+///
 /// # }
 /// ```
 pub struct DBIterator<'a> {
@@ -171,7 +171,7 @@ impl DBRawIterator<'_> {
     /// } else {
     ///     // There are no keys in the database
     /// }
-
+    ///
     /// # }
     /// ```
     pub fn seek_to_first(&mut self) {
@@ -211,7 +211,7 @@ impl DBRawIterator<'_> {
     /// } else {
     ///     // There are no keys in the database
     /// }
-
+    ///
     /// # }
     /// ```
     pub fn seek_to_last(&mut self) {
@@ -246,7 +246,7 @@ impl DBRawIterator<'_> {
     /// } else {
     ///     // There are no keys in the database
     /// }
-
+    ///
     /// # }
     /// ```
     pub fn seek<K: AsRef<[u8]>>(&mut self, key: K) {
@@ -288,7 +288,7 @@ impl DBRawIterator<'_> {
     /// } else {
     ///     // There are no keys in the database
     /// }
-
+    ///
     /// # }
     /// ```
     pub fn seek_for_prev<K: AsRef<[u8]>>(&mut self, key: K) {
