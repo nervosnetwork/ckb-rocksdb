@@ -1,6 +1,6 @@
 [package]
 name = "ckb-librocksdb-sys"
-version = "9.10.1"
+version = "9.10.2"
 edition = "2024"
 authors = ["Karl Hobley <karlhobley10@gmail.com>", "Arkadiy Paronyan <arkadiy@ethcore.io>", "Nervos Core Dev <dev@nervos.org>"]
 license = "MIT/Apache-2.0/BSD-3-Clause"

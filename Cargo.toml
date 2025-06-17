@@ -33,7 +33,7 @@ serde1 = ["serde"]
 [dependencies]
 home = "0.5"
 libc = "0.2"
-librocksdb-sys = { package = "ckb-librocksdb-sys", path = "librocksdb-sys", version = "=9.10.1" }
+librocksdb-sys = { package = "ckb-librocksdb-sys", path = "librocksdb-sys", version = "=9.10.2" }
 tempfile = "3"
 serde = { version = "1", features = ["derive"], optional = true }
 
