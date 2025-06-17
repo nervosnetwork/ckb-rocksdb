@@ -1712,8 +1712,8 @@ impl Options {
     /// On POSIX systems, after RocksDB reads data from disk it will
     /// mark the pages as "unneeded". The operating system may - or may not
     /// - evict these pages from memory, reducing pressure on the system
-    /// cache. If the disk block is requested again this can result in
-    /// additional disk I/O.
+    ///   cache. If the disk block is requested again this can result in
+    ///   additional disk I/O.
     ///
     /// On WINDOWS systems, files will be opened in "unbuffered I/O" mode
     /// which means that data read from the disk will not be cached or

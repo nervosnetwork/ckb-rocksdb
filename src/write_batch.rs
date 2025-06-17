@@ -39,7 +39,6 @@ use libc::{c_char, size_t};
 /// batch.put(b"key3", b"value3");
 ///
 /// db.write(&batch); // Atomically commits the batch
-
 /// # }
 /// ```
 pub struct WriteBatch {

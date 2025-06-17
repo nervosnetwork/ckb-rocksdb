@@ -30,7 +30,6 @@ use crate::{
 ///     let db = DB::open_default(&path).unwrap();
 ///     let snapshot = db.snapshot(); // Creates a longer-term snapshot of the DB, but closed when goes out of scope
 ///     let mut iter = snapshot.iterator(IteratorMode::Start); // Make as many iterators as you'd like from one snapshot
-
 /// # }
 /// ```
 ///

@@ -299,6 +299,9 @@ fn build_rocksdb() {
     config.file("build_version.cc");
 
     config.cpp(true);
+
+    config.flag("-include").flag("cstdint");
+
     config.compile("librocksdb.a");
 }
 

@@ -215,10 +215,7 @@ impl<'a> Iterator for &'a mut MergeOperands {
                 let len = *len_ptr;
                 let ptr = base + (spacing * self.cursor);
                 self.cursor += 1;
-                Some(slice::from_raw_parts(
-                    *(ptr as *const *const u8) as *const u8,
-                    len,
-                ))
+                Some(slice::from_raw_parts(*(ptr as *const *const u8), len))
             }
         }
     }
