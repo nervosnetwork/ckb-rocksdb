@@ -138,6 +138,21 @@ fn build_rocksdb() {
         config.include("bzip2/");
     }
 
+    // rust-rocksdb/rust-rocksdb:
+    // https://github.com/rust-rocksdb/rust-rocksdb/commit/b2dab4a0915eed72741657f783118d9220d4f070
+    //
+    // facebook/rocksdb:
+    // https://github.com/facebook/rocksdb/blob/be7703b27d9b3ac458641aaadf27042d86f6869c/Makefile#L195
+    if cfg!(feature = "lto") {
+        config.flag("-flto");
+        if !config.get_compiler().is_like_clang() {
+            panic!(
+                "LTO is only supported with clang. Either disable the `lto` feature\
+             or set `CC=/usr/bin/clang CXX=/usr/bin/clang++` environment variables."
+            );
+        }
+    }
+
     config.include(".");
     config.define("NDEBUG", Some("1"));
     // Explicitly disable stats and perf
