@@ -1,5 +1,5 @@
 #[cfg(all(feature = "portable", feature = "march-native"))]
-compile_error!("feature "portable" and feature "march_native" cannot be enabled at the same time");
+compile_error!("feature 'portable' and feature 'march-native' cannot be enabled at the same time");
 
 use std::env;
 use std::fs;
