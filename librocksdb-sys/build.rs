@@ -3,10 +3,14 @@ compile_error!("feature 'portable' and feature 'march-native' cannot be enabled 
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const RUST_TARGET: &str = "1.85.0";
+const RUST_TARGET: &str = "1.89.0";
+// On these platforms jemalloc-sys will use a prefixed jemalloc which cannot be linked together
+// with RocksDB.
+// See https://github.com/tikv/jemallocator/blob/tikv-jemalloc-sys-0.5.3/jemalloc-sys/src/env.rs#L25
+const NO_JEMALLOC_TARGETS: &[&str] = &["android", "dragonfly", "musl", "darwin"];
 
 fn get_flags_from_detect_platform_script() -> Option<Vec<String>> {
     if !cfg!(target_os = "windows") {
@@ -124,18 +128,27 @@ fn build_rocksdb() {
 
     if cfg!(feature = "zstd") {
         config.define("ZSTD", Some("1"));
-        config.include("zstd/lib/");
-        config.include("zstd/lib/dictBuilder/");
+        if let Some(path) = env::var_os("DEP_ZSTD_INCLUDE") {
+            config.include(path);
+        }
     }
 
     if cfg!(feature = "zlib") {
         config.define("ZLIB", Some("1"));
-        config.include("zlib/");
+        if let Some(path) = env::var_os("DEP_Z_INCLUDE") {
+            config.include(path);
+        }
     }
 
     if cfg!(feature = "bzip2") {
         config.define("BZIP2", Some("1"));
-        config.include("bzip2/");
+        if let Some(path) = env::var_os("DEP_BZIP2_INCLUDE") {
+            config.include(path);
+        }
+    }
+
+    if cfg!(feature = "rtti") {
+        config.define("USE_RTTI", Some("1"));
     }
 
     // rust-rocksdb/rust-rocksdb:
@@ -147,8 +160,8 @@ fn build_rocksdb() {
         config.flag("-flto");
         if !config.get_compiler().is_like_clang() {
             panic!(
-                "LTO is only supported with clang. Either disable the `lto` feature\
-             or set `CC=/usr/bin/clang CXX=/usr/bin/clang++` environment variables."
+                "LTO is only supported with clang. Either disable the `lto` feature \
+                or set `CC=/usr/bin/clang CXX=/usr/bin/clang++` environment variables."
             );
         }
     }
@@ -286,23 +299,28 @@ fn build_rocksdb() {
         config.flag("-Wno-missing-field-initializers");
         config.flag("-Wno-strict-aliasing");
         config.flag("-Wno-invalid-offsetof");
+    }
 
-        if cfg!(feature = "jemalloc") {
-            if let Err(e) = pkg_config::probe_library("jemalloc") {
-                panic!("pkg_config jemalloc {}", e);
-            } else {
-                config.define("ROCKSDB_JEMALLOC", None);
-                config.define("JEMALLOC_NO_DEMANGLE", None);
-            }
-        }
-
+    config.define("ROCKSDB_SUPPORT_THREAD_LOCAL", None);
+    if target.contains("linux") {
         if cfg!(feature = "io-uring") {
-            if let Err(e) = pkg_config::probe_library("liburing") {
-                panic!("pkg_config liburing {}", e);
-            } else {
-                config.define("ROCKSDB_IOURING_PRESENT", None);
-            }
+            pkg_config::probe_library("liburing")
+                .expect("The io-uring feature was requested but the library is not available");
+            config.define("ROCKSDB_IOURING_PRESENT", Some("1"));
         }
+    }
+
+    if cfg!(feature = "jemalloc") && NO_JEMALLOC_TARGETS.iter().all(|i| !target.contains(i)) {
+        config.define("ROCKSDB_JEMALLOC", Some("1"));
+        config.define("JEMALLOC_NO_DEMANGLE", Some("1"));
+        if let Some(jemalloc_root) = env::var_os("DEP_JEMALLOC_ROOT") {
+            config.include(Path::new(&jemalloc_root).join("include"));
+        }
+    }
+
+    config.flag_if_supported("-std=c++17");
+    if !target.contains("windows") {
+        config.flag("-include").flag("cstdint");
     }
 
     for file in lib_sources {
@@ -314,8 +332,6 @@ fn build_rocksdb() {
     config.file("build_version.cc");
 
     config.cpp(true);
-
-    config.flag("-include").flag("cstdint");
 
     config.compile("librocksdb.a");
 }
@@ -369,75 +385,6 @@ fn build_lz4() {
     compiler.compile("liblz4.a");
 }
 
-fn build_zstd() {
-    let mut compiler = cc::Build::new();
-
-    compiler.include("zstd/lib/");
-    compiler.include("zstd/lib/common");
-    compiler.include("zstd/lib/legacy");
-
-    let globs = &[
-        "zstd/lib/common/*.c",
-        "zstd/lib/compress/*.c",
-        "zstd/lib/decompress/*.c",
-        "zstd/lib/dictBuilder/*.c",
-        "zstd/lib/legacy/*.c",
-    ];
-
-    for pattern in globs {
-        for path in glob::glob(pattern).unwrap() {
-            let path = path.unwrap();
-            compiler.file(path);
-        }
-    }
-
-    compiler.opt_level(3);
-    compiler.extra_warnings(false);
-
-    compiler.define("ZSTD_LIB_DEPRECATED", Some("0"));
-    compiler.compile("libzstd.a");
-}
-
-fn build_zlib() {
-    let mut compiler = cc::Build::new();
-
-    let globs = &["zlib/*.c"];
-
-    for pattern in globs {
-        for path in glob::glob(pattern).unwrap() {
-            let path = path.unwrap();
-            compiler.file(path);
-        }
-    }
-
-    compiler.flag_if_supported("-Wno-implicit-function-declaration");
-    compiler.opt_level(3);
-    compiler.extra_warnings(false);
-    compiler.compile("libz.a");
-}
-
-fn build_bzip2() {
-    let mut compiler = cc::Build::new();
-
-    compiler
-        .file("bzip2/blocksort.c")
-        .file("bzip2/bzlib.c")
-        .file("bzip2/compress.c")
-        .file("bzip2/crctable.c")
-        .file("bzip2/decompress.c")
-        .file("bzip2/huffman.c")
-        .file("bzip2/randtable.c");
-
-    compiler
-        .define("_FILE_OFFSET_BITS", Some("64"))
-        .define("BZ_NO_STDIO", None);
-
-    compiler.extra_warnings(false);
-    compiler.opt_level(3);
-    compiler.extra_warnings(false);
-    compiler.compile("libbz2.a");
-}
-
 fn try_to_find_and_link_lib(lib_name: &str) -> bool {
     if let Ok(v) = env::var(&format!("{}_COMPILE", lib_name)) {
         if v.to_lowercase() == "true" || v == "1" {
@@ -486,19 +433,6 @@ fn main() {
         fail_on_empty_directory("lz4");
         build_lz4();
     }
-    if cfg!(feature = "zstd") && !try_to_find_and_link_lib("ZSTD") {
-        println!("cargo:rerun-if-changed=zstd/");
-        fail_on_empty_directory("zstd");
-        build_zstd();
-    }
-    if cfg!(feature = "zlib") && !try_to_find_and_link_lib("Z") {
-        println!("cargo:rerun-if-changed=zlib/");
-        fail_on_empty_directory("zlib");
-        build_zlib();
-    }
-    if cfg!(feature = "bzip2") && !try_to_find_and_link_lib("BZ2") {
-        println!("cargo:rerun-if-changed=bzip2/");
-        fail_on_empty_directory("bzip2");
-        build_bzip2();
-    }
+
+    println!("cargo:out_dir={}", env::var("OUT_DIR").unwrap());
 }

@@ -9,48 +9,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
       - name: Install rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.85.0
           components: rustfmt
-          profile: minimal
           override: true
-      - name: Run rustfmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+      - name: Check formatting
+        run: |
+          cargo fmt --all -- --check
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
         with:
           submodules: true
       - name: Install rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.85.0
           components: clippy
-          profile: minimal
           override: true
       - run: sudo apt update && sudo apt install -y libclang-dev
       - name: Run clippy
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all --tests -- -A clippy::upper-case-acronyms -A clippy::missing_safety_doc -D warnings
+        run: |
+          cargo clippy --all --tests -- -A clippy::upper-case-acronyms -A clippy::missing_safety_doc -D warnings
 
   audit:
     name: Security audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/audit-check@v1
+      - uses: actions/checkout@v6
+      - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -61,7 +55,7 @@ jobs:
     steps:
       - run: sudo apt update && sudo apt install -y valgrind libclang-dev
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
         with:
           submodules: true
       - name: run test
@@ -79,7 +73,7 @@ jobs:
           - build: Linux
             os: ubuntu-22.04
           - build: macOS
-            os: macos-12
+            os: macos-latest
           - build: windows-2022
             os: windows-2022
     steps:
@@ -93,11 +87,11 @@ jobs:
           remove-android: 'true'
           remove-haskell: 'true'
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
         with:
           submodules: true
       - name: Install rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.85.0
           target: ${{ matrix.target }}
@@ -123,36 +117,25 @@ jobs:
         run: clang --version && env
       - name: Run librocksdb-sys tests
         if: runner.os == 'Linux' || runner.os == 'Windows'
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --manifest-path=librocksdb-sys/Cargo.toml -vvvvv
+        run: |
+          cargo test --manifest-path=librocksdb-sys/Cargo.toml -vvvvv
       - name: Run rocksdb tests
         if: runner.os == 'Linux' || runner.os == 'Windows'
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
+        run: |
+          cargo test
       - name: Run rocksdb tests (jemalloc)
         if: runner.os == 'Linux'
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features jemalloc
+        run: |
+          cargo test --features jemalloc
       - name: Run rocksdb tests (io-uring)
         if: runner.os == 'Linux'
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features io-uring
+        run: |
+          cargo test --features io-uring
       - name: Run rocksdb tests (portable)
         if: runner.os == 'Linux' || runner.os == 'macOS'
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features portable
+        run: |
+          cargo test --features portable
       - name: Run rocksdb tests (march-native)
         if: runner.os == 'Linux'
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features march-native
+        run: |
+          cargo test --features march-native
