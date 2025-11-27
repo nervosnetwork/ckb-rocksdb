@@ -192,22 +192,22 @@ where
 
 pub trait BatchedMultiGetCF<R> {
     fn batched_multi_get_cf_full<'a, K, I>(
-        &self,
+        &'a self,
         cf: &ColumnFamily,
         keys: I,
         sorted_input: bool,
         readopts: Option<&R>,
-    ) -> Vec<Result<Option<DBPinnableSlice>, Error>>
+    ) -> Vec<Result<Option<DBPinnableSlice<'a>>, Error>>
     where
         K: AsRef<[u8]> + 'a + ?Sized,
         I: IntoIterator<Item = &'a K>;
 
     fn batched_multi_get_cf<'a, K, I>(
-        &self,
+        &'a self,
         cf: &ColumnFamily,
         keys: I,
         sorted_input: bool,
-    ) -> Vec<Result<Option<DBPinnableSlice>, Error>>
+    ) -> Vec<Result<Option<DBPinnableSlice<'a>>, Error>>
     where
         K: AsRef<[u8]> + 'a + ?Sized,
         I: IntoIterator<Item = &'a K>,
@@ -216,12 +216,12 @@ pub trait BatchedMultiGetCF<R> {
     }
 
     fn batched_multi_get_cf_opt<'a, K, I>(
-        &self,
+        &'a self,
         cf: &ColumnFamily,
         keys: I,
         sorted_input: bool,
         readopts: &R,
-    ) -> Vec<Result<Option<DBPinnableSlice>, Error>>
+    ) -> Vec<Result<Option<DBPinnableSlice<'a>>, Error>>
     where
         K: AsRef<[u8]> + 'a + ?Sized,
         I: IntoIterator<Item = &'a K>,
@@ -235,12 +235,12 @@ where
     T: Handle<ffi::rocksdb_t> + super::Read,
 {
     fn batched_multi_get_cf_full<'a, K, I>(
-        &self,
+        &'a self,
         cf: &ColumnFamily,
         keys: I,
         sorted_input: bool,
         readopts: Option<&ReadOptions>,
-    ) -> Vec<Result<Option<DBPinnableSlice>, Error>>
+    ) -> Vec<Result<Option<DBPinnableSlice<'a>>, Error>>
     where
         K: AsRef<[u8]> + 'a + ?Sized,
         I: IntoIterator<Item = &'a K>,

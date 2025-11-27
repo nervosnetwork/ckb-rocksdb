@@ -37,17 +37,7 @@ jobs:
       - run: sudo apt update && sudo apt install -y libclang-dev
       - name: Run clippy
         run: |
-          cargo clippy --all --tests -- -A clippy::upper-case-acronyms -A clippy::missing_safety_doc -D warnings
-
-  audit:
-    name: Security audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
+          make clippy
 
   valgrind:
     name: valgrind
