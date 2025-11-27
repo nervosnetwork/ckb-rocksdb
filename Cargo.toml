@@ -41,7 +41,7 @@ serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
 trybuild = "1.0"
-criterion = "0.5"
+criterion = "0.7"
 
 [[bench]]
 name = "transaction"

@@ -128,23 +128,18 @@ fn build_rocksdb() {
 
     if cfg!(feature = "zstd") {
         config.define("ZSTD", Some("1"));
-        if let Some(path) = env::var_os("DEP_ZSTD_INCLUDE") {
-            config.include(path);
-        }
+        config.include("zstd/lib/");
+        config.include("zstd/lib/dictBuilder/");
     }
 
     if cfg!(feature = "zlib") {
         config.define("ZLIB", Some("1"));
-        if let Some(path) = env::var_os("DEP_Z_INCLUDE") {
-            config.include(path);
-        }
+        config.include("zlib/");
     }
 
     if cfg!(feature = "bzip2") {
         config.define("BZIP2", Some("1"));
-        if let Some(path) = env::var_os("DEP_BZIP2_INCLUDE") {
-            config.include(path);
-        }
+        config.include("bzip2/");
     }
 
     if cfg!(feature = "rtti") {
@@ -385,6 +380,91 @@ fn build_lz4() {
     compiler.compile("liblz4.a");
 }
 
+fn build_zstd() {
+    let mut compiler = cc::Build::new();
+
+    compiler.include("zstd/lib/");
+    compiler.include("zstd/lib/common");
+    compiler.include("zstd/lib/legacy");
+
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+
+    let globs = &[
+        "zstd/lib/common/*.c",
+        "zstd/lib/compress/*.c",
+        "zstd/lib/decompress/*.c",
+        "zstd/lib/dictBuilder/*.c",
+        "zstd/lib/legacy/*.c",
+    ];
+
+    for pattern in globs {
+        for path in glob::glob(pattern).unwrap() {
+            let path = path.unwrap();
+            compiler.file(path);
+        }
+    }
+
+    if target_arch.contains("x86_64") {
+        if env::var("CARGO_CFG_WINDOWS").is_ok() {
+            compiler.define("ZSTD_DISABLE_ASM", Some(""));
+        } else {
+            compiler.file("zstd/lib/decompress/huf_decompress_amd64.S");
+        }
+    } else {
+        compiler.define("ZSTD_DISABLE_ASM", Some(""));
+    }
+
+    compiler.opt_level(3);
+    compiler.extra_warnings(false);
+    compiler
+        .flag_if_supported("-ffunction-sections")
+        .flag_if_supported("-fdata-sections")
+        .flag_if_supported("-fmerge-all-constants");
+
+    compiler.define("ZSTD_LIB_DEPRECATED", Some("0"));
+    compiler.compile("libzstd.a");
+}
+
+fn build_zlib() {
+    let mut compiler = cc::Build::new();
+
+    let globs = &["zlib/*.c"];
+
+    for pattern in globs {
+        for path in glob::glob(pattern).unwrap() {
+            let path = path.unwrap();
+            compiler.file(path);
+        }
+    }
+
+    compiler.flag_if_supported("-Wno-implicit-function-declaration");
+    compiler.opt_level(3);
+    compiler.extra_warnings(false);
+    compiler.compile("libz.a");
+}
+
+fn build_bzip2() {
+    let mut compiler = cc::Build::new();
+
+    compiler
+        .file("bzip2/blocksort.c")
+        .file("bzip2/bzlib.c")
+        .file("bzip2/compress.c")
+        .file("bzip2/crctable.c")
+        .file("bzip2/decompress.c")
+        .file("bzip2/huffman.c")
+        .file("bzip2/randtable.c");
+
+    compiler
+        .define("_FILE_OFFSET_BITS", Some("64"))
+        .define("BZ_NO_STDIO", None);
+
+    compiler.extra_warnings(false);
+    compiler.opt_level(3);
+    compiler.extra_warnings(false);
+    compiler.compile("libbz2.a");
+}
+
 fn try_to_find_and_link_lib(lib_name: &str) -> bool {
     if let Ok(v) = env::var(&format!("{}_COMPILE", lib_name)) {
         if v.to_lowercase() == "true" || v == "1" {
@@ -432,6 +512,21 @@ fn main() {
         println!("cargo:rerun-if-changed=lz4/");
         fail_on_empty_directory("lz4");
         build_lz4();
+    }
+    if cfg!(feature = "zstd") && !try_to_find_and_link_lib("ZSTD") {
+        println!("cargo:rerun-if-changed=zstd/");
+        fail_on_empty_directory("zstd");
+        build_zstd();
+    }
+    if cfg!(feature = "zlib") && !try_to_find_and_link_lib("Z") {
+        println!("cargo:rerun-if-changed=zlib/");
+        fail_on_empty_directory("zlib");
+        build_zlib();
+    }
+    if cfg!(feature = "bzip2") && !try_to_find_and_link_lib("BZ2") {
+        println!("cargo:rerun-if-changed=bzip2/");
+        fail_on_empty_directory("bzip2");
+        build_bzip2();
     }
 
     println!("cargo:out_dir={}", env::var("OUT_DIR").unwrap());

@@ -15,7 +15,6 @@ jobs:
         with:
           toolchain: 1.89.0
           components: rustfmt
-          override: true
       - name: Check formatting
         run: |
           cargo fmt --all -- --check
@@ -32,8 +31,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.89.0
-          components: clippy
-          override: true
+          components: clippy rustfmt
       - run: sudo apt update && sudo apt install -y libclang-dev
       - name: Run clippy
         run: |
@@ -90,23 +88,19 @@ jobs:
         with:
           toolchain: 1.89.0
           target: ${{ matrix.target }}
-          profile: minimal
-          override: true
+          components: rustfmt
       - name: Remove msys64 # Workaround to resolve link error with C:\msys64\mingw64\bin\libclang.dll
         if: runner.os == 'Windows'
         run: Remove-Item -LiteralPath "C:\msys64\" -Force -Recurse
       - name: Install dependencies
         if: runner.os == 'Windows'
         run: choco install llvm -y
-      - name: Install libclang-dev
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install llvm lld
+      - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt install libclang-dev
-      - name: Install jemalloc
-        if: runner.os == 'Linux'
-        run: sudo apt install libjemalloc-dev
-      - name: Install liburing
-        if: runner.os == 'Linux'
-        run: sudo apt install liburing-dev
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev libjemalloc-dev liburing-dev
       - name: Debug librocksdb-sys tests
         if: runner.os == 'Linux' || runner.os == 'Windows'
         run: clang --version && env
