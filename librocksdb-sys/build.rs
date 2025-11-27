@@ -6,7 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-const RUST_TARGET: &str = "1.85.0";
+const RUST_TARGET: &str = "1.89.0";
 
 fn get_flags_from_detect_platform_script() -> Option<Vec<String>> {
     if !cfg!(target_os = "windows") {

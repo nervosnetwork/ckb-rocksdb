@@ -13,7 +13,7 @@ jobs:
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.85.0
+          toolchain: 1.89.0
           components: rustfmt
           override: true
       - name: Check formatting
@@ -31,7 +31,7 @@ jobs:
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.85.0
+          toolchain: 1.89.0
           components: clippy
           override: true
       - run: sudo apt update && sudo apt install -y libclang-dev
@@ -93,7 +93,7 @@ jobs:
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.85.0
+          toolchain: 1.89.0
           target: ${{ matrix.target }}
           profile: minimal
           override: true
