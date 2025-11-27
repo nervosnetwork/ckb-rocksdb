@@ -6,7 +6,7 @@ authors = ["Karl Hobley <karlhobley10@gmail.com>", "Arkadiy Paronyan <arkadiy@et
 license = "MIT/Apache-2.0/BSD-3-Clause"
 description = "Native bindings to librocksdb"
 readme = "README.md"
-repository = "https://github.com/nervosnetwork/rust-rocksdb"
+repository = "https://github.com/nervosnetwork/ckb-rocksdb"
 keywords = [ "ffi", "rocksdb" ]
 
 build = "build.rs"

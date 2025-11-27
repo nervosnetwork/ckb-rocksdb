@@ -1,9 +1,9 @@
-rust-rocksdb
+ckb-rocksdb
 ============
-[![Build Status](https://github.com/nervosnetwork/rust-rocksdb/actions/workflows/rust.yml/badge.svg?branch=txn)](https://github.com/nervosnetwork/rust-rocksdb/actions/workflows/rust.yml?query=branch%3Atxn)
+[![Build Status](https://github.com/nervosnetwork/ckb-rocksdb/actions/workflows/rust.yml/badge.svg)](https://github.com/nervosnetwork/ckb-rocksdb/actions/workflows/rust.yml?query=branch%3Amaster)
 [![crates.io](https://img.shields.io/crates/v/ckb-rocksdb.svg)](https://crates.io/crates/ckb-rocksdb)
 [![documentation](https://docs.rs/ckb-rocksdb/badge.svg)](https://docs.rs/ckb-rocksdb)
-[![license](https://img.shields.io/crates/l/ckb-rocksdb.svg)](https://github.com/nervosnetwork/rust-rocksdb/blob/txn/LICENSE)
+[![license](https://img.shields.io/crates/l/ckb-rocksdb.svg)](https://github.com/nervosnetwork/ckb-rocksdb/blob/master/LICENSE)
 [![Discord](https://img.shields.io/badge/chat-on%20Discord-7289DA.svg)](https://discord.com/invite/nervos)
 
 
