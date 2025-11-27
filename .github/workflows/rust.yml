@@ -76,6 +76,11 @@ jobs:
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+      - name: Delete huge unnecessary tools folder
+        if: runner.os == 'Linux'
+        run: rm -rf /opt/hostedtoolcache
       - name: Checkout sources
         uses: actions/checkout@v6
         with:
