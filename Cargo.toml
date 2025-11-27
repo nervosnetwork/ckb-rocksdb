@@ -29,6 +29,7 @@ io-uring = ["librocksdb-sys/io-uring"]
 portable = ["librocksdb-sys/portable"]
 march-native = ["librocksdb-sys/march-native"]
 serde1 = ["serde"]
+lto = ["librocksdb-sys/lto"]
 
 [dependencies]
 home = "0.5"
