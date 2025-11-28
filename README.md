@@ -6,6 +6,7 @@ ckb-rocksdb
 [![license](https://img.shields.io/crates/l/ckb-rocksdb.svg)](https://github.com/nervosnetwork/ckb-rocksdb/blob/master/LICENSE)
 [![Discord](https://img.shields.io/badge/chat-on%20Discord-7289DA.svg)](https://discord.com/invite/nervos)
 
+A high-performance RocksDB wrapper tailored for Nervos CKB (Common Knowledge Base), with CKB-specific optimizations
 
 ## Requirements
 
