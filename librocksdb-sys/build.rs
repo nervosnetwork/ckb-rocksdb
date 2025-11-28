@@ -3,10 +3,14 @@ compile_error!("feature 'portable' and feature 'march-native' cannot be enabled 
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const RUST_TARGET: &str = "1.85.0";
+const RUST_TARGET: &str = "1.89.0";
+// On these platforms jemalloc-sys will use a prefixed jemalloc which cannot be linked together
+// with RocksDB.
+// See https://github.com/tikv/jemallocator/blob/tikv-jemalloc-sys-0.5.3/jemalloc-sys/src/env.rs#L25
+const NO_JEMALLOC_TARGETS: &[&str] = &["android", "dragonfly", "musl", "darwin"];
 
 fn get_flags_from_detect_platform_script() -> Option<Vec<String>> {
     if !cfg!(target_os = "windows") {
@@ -138,6 +142,10 @@ fn build_rocksdb() {
         config.include("bzip2/");
     }
 
+    if cfg!(feature = "rtti") {
+        config.define("USE_RTTI", Some("1"));
+    }
+
     // rust-rocksdb/rust-rocksdb:
     // https://github.com/rust-rocksdb/rust-rocksdb/commit/b2dab4a0915eed72741657f783118d9220d4f070
     //
@@ -147,8 +155,8 @@ fn build_rocksdb() {
         config.flag("-flto");
         if !config.get_compiler().is_like_clang() {
             panic!(
-                "LTO is only supported with clang. Either disable the `lto` feature\
-             or set `CC=/usr/bin/clang CXX=/usr/bin/clang++` environment variables."
+                "LTO is only supported with clang. Either disable the `lto` feature \
+                or set `CC=/usr/bin/clang CXX=/usr/bin/clang++` environment variables."
             );
         }
     }
@@ -286,23 +294,28 @@ fn build_rocksdb() {
         config.flag("-Wno-missing-field-initializers");
         config.flag("-Wno-strict-aliasing");
         config.flag("-Wno-invalid-offsetof");
+    }
 
-        if cfg!(feature = "jemalloc") {
-            if let Err(e) = pkg_config::probe_library("jemalloc") {
-                panic!("pkg_config jemalloc {}", e);
-            } else {
-                config.define("ROCKSDB_JEMALLOC", None);
-                config.define("JEMALLOC_NO_DEMANGLE", None);
-            }
-        }
-
+    config.define("ROCKSDB_SUPPORT_THREAD_LOCAL", None);
+    if target.contains("linux") {
         if cfg!(feature = "io-uring") {
-            if let Err(e) = pkg_config::probe_library("liburing") {
-                panic!("pkg_config liburing {}", e);
-            } else {
-                config.define("ROCKSDB_IOURING_PRESENT", None);
-            }
+            pkg_config::probe_library("liburing")
+                .expect("The io-uring feature was requested but the library is not available");
+            config.define("ROCKSDB_IOURING_PRESENT", Some("1"));
         }
+    }
+
+    if cfg!(feature = "jemalloc") && NO_JEMALLOC_TARGETS.iter().all(|i| !target.contains(i)) {
+        config.define("ROCKSDB_JEMALLOC", Some("1"));
+        config.define("JEMALLOC_NO_DEMANGLE", Some("1"));
+        if let Some(jemalloc_root) = env::var_os("DEP_JEMALLOC_ROOT") {
+            config.include(Path::new(&jemalloc_root).join("include"));
+        }
+    }
+
+    config.flag_if_supported("-std=c++17");
+    if !target.contains("windows") {
+        config.flag("-include").flag("cstdint");
     }
 
     for file in lib_sources {
@@ -314,8 +327,6 @@ fn build_rocksdb() {
     config.file("build_version.cc");
 
     config.cpp(true);
-
-    config.flag("-include").flag("cstdint");
 
     config.compile("librocksdb.a");
 }
@@ -376,6 +387,8 @@ fn build_zstd() {
     compiler.include("zstd/lib/common");
     compiler.include("zstd/lib/legacy");
 
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+
     let globs = &[
         "zstd/lib/common/*.c",
         "zstd/lib/compress/*.c",
@@ -391,8 +404,22 @@ fn build_zstd() {
         }
     }
 
+    if target_arch.contains("x86_64") {
+        if env::var("CARGO_CFG_WINDOWS").is_ok() {
+            compiler.define("ZSTD_DISABLE_ASM", Some(""));
+        } else {
+            compiler.file("zstd/lib/decompress/huf_decompress_amd64.S");
+        }
+    } else {
+        compiler.define("ZSTD_DISABLE_ASM", Some(""));
+    }
+
     compiler.opt_level(3);
     compiler.extra_warnings(false);
+    compiler
+        .flag_if_supported("-ffunction-sections")
+        .flag_if_supported("-fdata-sections")
+        .flag_if_supported("-fmerge-all-constants");
 
     compiler.define("ZSTD_LIB_DEPRECATED", Some("0"));
     compiler.compile("libzstd.a");
@@ -501,4 +528,6 @@ fn main() {
         fail_on_empty_directory("bzip2");
         build_bzip2();
     }
+
+    println!("cargo:out_dir={}", env::var("OUT_DIR").unwrap());
 }

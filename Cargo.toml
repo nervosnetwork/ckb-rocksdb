@@ -6,7 +6,7 @@ edition = "2024"
 authors = ["Tyler Neely <t@jujit.su>", "David Greenberg <dsg123456789@gmail.com>", "Nervos Core Dev <dev@nervos.org>"]
 license = "Apache-2.0"
 keywords = ["database", "embedded", "LSM-tree", "persistence"]
-repository = "https://github.com/nervosnetwork/rust-rocksdb"
+repository = "https://github.com/nervosnetwork/ckb-rocksdb"
 exclude = [
     ".gitignore",
     "*.yml",
@@ -14,7 +14,7 @@ exclude = [
     "*.md",
     "benches",
 ]
-rust-version = "1.85.0"
+rust-version = "1.89.0"
 
 [features]
 default = ["snappy", "lz4", "zstd", "zlib", "bzip2"]
@@ -30,6 +30,7 @@ portable = ["librocksdb-sys/portable"]
 march-native = ["librocksdb-sys/march-native"]
 serde1 = ["serde"]
 lto = ["librocksdb-sys/lto"]
+rtti = ["librocksdb-sys/rtti"]
 
 [dependencies]
 home = "0.5"
@@ -40,7 +41,7 @@ serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
 trybuild = "1.0"
-criterion = "0.5"
+criterion = "0.7"
 
 [[bench]]
 name = "transaction"

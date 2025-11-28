@@ -6,7 +6,7 @@ authors = ["Karl Hobley <karlhobley10@gmail.com>", "Arkadiy Paronyan <arkadiy@et
 license = "MIT/Apache-2.0/BSD-3-Clause"
 description = "Native bindings to librocksdb"
 readme = "README.md"
-repository = "https://github.com/nervosnetwork/rust-rocksdb"
+repository = "https://github.com/nervosnetwork/ckb-rocksdb"
 keywords = [ "ffi", "rocksdb" ]
 
 build = "build.rs"
@@ -37,6 +37,7 @@ zstd = []
 zlib = []
 bzip2 = []
 lto = []
+rtti = []
 
 
 [dependencies]
@@ -49,7 +50,7 @@ uuid = { version = "1.0", features = ["v4"] }
 
 [build-dependencies]
 cc = { version = "1.0", features = ["parallel"] }
-bindgen = { version = "0.71.1", default-features = false }
+bindgen = { version = "0.72.1" }
 glob = "0.3.2"
 pkg-config = "0.3"
 rust-ini = "0.21"
