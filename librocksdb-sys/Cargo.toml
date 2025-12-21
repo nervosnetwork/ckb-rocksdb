@@ -1,6 +1,6 @@
 [package]
 name = "ckb-librocksdb-sys"
-version = "9.10.2"
+version = "10.7.5"
 edition = "2024"
 authors = ["Karl Hobley <karlhobley10@gmail.com>", "Arkadiy Paronyan <arkadiy@ethcore.io>", "Nervos Core Dev <dev@nervos.org>"]
 license = "MIT/Apache-2.0/BSD-3-Clause"
@@ -51,6 +51,6 @@ uuid = { version = "1.0", features = ["v4"] }
 [build-dependencies]
 cc = { version = "1.0", features = ["parallel"] }
 bindgen = { version = "0.72.1" }
-glob = "0.3.2"
+glob = "0.3.3"
 pkg-config = "0.3"
 rust-ini = "0.21"

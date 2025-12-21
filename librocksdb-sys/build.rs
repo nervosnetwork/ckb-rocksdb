@@ -267,12 +267,11 @@ fn build_rocksdb() {
         // Add Windows-specific sources
         lib_sources.extend([
             "port/win/env_default.cc",
-            "port/win/port_win.cc",
-            "port/win/xpress_win.cc",
-            "port/win/io_win.cc",
-            "port/win/win_thread.cc",
             "port/win/env_win.cc",
+            "port/win/io_win.cc",
+            "port/win/port_win.cc",
             "port/win/win_logger.cc",
+            "port/win/win_thread.cc",
         ]);
 
         if cfg!(feature = "jemalloc") {
@@ -282,7 +281,7 @@ fn build_rocksdb() {
 
     if target.contains("msvc") {
         config.flag("-EHsc");
-        config.flag("-std:c++17");
+        config.flag("-std:c++20");
     } else {
         // matches the flags in CMakeLists.txt from rocksdb
         config.flag("-Wsign-compare");
@@ -313,7 +312,7 @@ fn build_rocksdb() {
         }
     }
 
-    config.flag_if_supported("-std=c++17");
+    config.flag_if_supported("-std=c++20");
     if !target.contains("windows") {
         config.flag("-include").flag("cstdint");
     }
@@ -485,7 +484,7 @@ fn try_to_find_and_link_lib(lib_name: &str) -> bool {
 }
 
 fn cxx_standard() -> String {
-    env::var("ROCKSDB_CXX_STD").map_or("-std=c++17".to_owned(), |cxx_std| {
+    env::var("ROCKSDB_CXX_STD").map_or("-std=c++20".to_owned(), |cxx_std| {
         if !cxx_std.starts_with("-std=") {
             format!("-std={}", cxx_std)
         } else {
