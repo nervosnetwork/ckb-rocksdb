@@ -159,6 +159,11 @@ fn build_rocksdb() {
     // Explicitly disable stats and perf
     config.define("NIOSTATS_CONTEXT", None);
     config.define("NPERF_CONTEXT", None);
+    config.define("HAVE_ALIGNED_NEW", None);
+
+    if !target.contains("msvc") {
+        config.define("HAVE_UINT128_EXTENSION", None);
+    }
 
     let mut lib_sources = include_str!("rocksdb_lib_sources.txt")
         .trim()
@@ -231,6 +236,10 @@ fn build_rocksdb() {
         config.define("OS_LINUX", None);
         config.define("ROCKSDB_PLATFORM_POSIX", None);
         config.define("ROCKSDB_LIB_IO_POSIX", None);
+        config.define("ROCKSDB_SCHED_GETCPU_PRESENT", None);
+        config.define("ROCKSDB_AUXV_GETAUXVAL_PRESENT", None);
+        config.define("ROCKSDB_FALLOCATE_PRESENT", None);
+        config.define("ROCKSDB_RANGESYNC_PRESENT", None);
     } else if target.contains("freebsd") {
         config.define("OS_FREEBSD", None);
         config.define("ROCKSDB_PLATFORM_POSIX", None);
@@ -241,7 +250,7 @@ fn build_rocksdb() {
         config.flag(cxx_standard());
     }
 
-    if target.contains("aarch64") {
+    if target_arch == "aarch64" {
         lib_sources.push("util/crc32c_arm64.cc")
     }
 
@@ -504,12 +513,15 @@ fn build_bzip2() {
 }
 
 fn try_to_find_and_link_lib(lib_name: &str) -> bool {
+    println!("cargo:rerun-if-env-changed={lib_name}_COMPILE");
     if let Ok(v) = env::var(&format!("{}_COMPILE", lib_name)) {
         if v.to_lowercase() == "true" || v == "1" {
             return false;
         }
     }
 
+    println!("cargo:rerun-if-env-changed={lib_name}_LIB_DIR");
+    println!("cargo:rerun-if-env-changed={lib_name}_STATIC");
     if let Ok(lib_dir) = env::var(&format!("{}_LIB_DIR", lib_name)) {
         println!("cargo:rustc-link-search=native={}", lib_dir);
         let mode = match env::var_os(&format!("{}_STATIC", lib_name)) {
@@ -539,6 +551,8 @@ fn main() {
     println!("cargo:rerun-if-changed=rocksdb/");
     println!("cargo:rerun-if-changed=patches/");
     println!("cargo:rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
+    println!("cargo:rerun-if-env-changed=ROCKSDB_CXX_STD");
+    println!("cargo:rerun-if-env-changed=CXXSTDLIB");
     fail_on_empty_directory("rocksdb");
     build_rocksdb();
 
