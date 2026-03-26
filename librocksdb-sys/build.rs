@@ -4,7 +4,6 @@ compile_error!("feature 'portable' and feature 'march-native' cannot be enabled 
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const RUST_TARGET: &str = "1.89.0";
 // On these platforms jemalloc-sys will use a prefixed jemalloc which cannot be linked together
@@ -12,58 +11,46 @@ const RUST_TARGET: &str = "1.89.0";
 // See https://github.com/tikv/jemallocator/blob/tikv-jemalloc-sys-0.5.3/jemalloc-sys/src/env.rs#L25
 const NO_JEMALLOC_TARGETS: &[&str] = &["android", "dragonfly", "musl", "darwin"];
 
-fn get_flags_from_detect_platform_script() -> Option<Vec<String>> {
-    if !cfg!(target_os = "windows") {
-        let mut cmd = Command::new("bash");
+/// Splits `CARGO_ENCODED_RUSTFLAGS` into a Vec.
+fn split_encoded_rustflags() -> Vec<String> {
+    let flags = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap_or_default();
 
-        // if ROCKSDB_USE_IO_URING is not set, treat as enable
-        // we use pkg_config probe library, more friendly for rust.
-        cmd.env("ROCKSDB_USE_IO_URING", "0");
+    flags.split('\x1f').map(|flag| flag.to_string()).collect()
+}
 
-        if cfg!(feature = "static") {
-            cmd.env("LIB_MODE", "static");
+/// Returns the argument to `-Ctarget-cpu=` if it exists.
+fn get_target_cpu_flag() -> Option<String> {
+    const TARGET_CPU_FLAG: &str = "-Ctarget-cpu=";
+    let flags = split_encoded_rustflags();
+    let complete_flag = flags.iter().find(|flag| flag.starts_with(TARGET_CPU_FLAG));
+    complete_flag.map(|flag| flag[TARGET_CPU_FLAG.len()..].to_string())
+}
+
+/// If the Rust `-Ctarget-cpu=` option is set, attempt to pass it through to the
+/// C/C++ compiler so the native code matches Rust's CPU tuning.
+fn pass_through_target_cpu(cfg: &mut cc::Build, target: &str) {
+    if target.contains("msvc") {
+        return;
+    }
+
+    let Some(target_cpu_flag) = get_target_cpu_flag() else {
+        return;
+    };
+
+    let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    match arch.as_str() {
+        "x86_64" => {
+            cfg.flag_if_supported(format!("-march={target_cpu_flag}"));
         }
-
-        if cfg!(feature = "portable") {
-            cmd.env("PORTABLE", "1");
-        } else if !cfg!(feature = "march-native") {
-            cmd.env("PORTABLE", "1");
-            cmd.env("USE_SSE", "1");
+        "aarch64" => {
+            cfg.flag_if_supported(format!("-mcpu={target_cpu_flag}"));
         }
-
-        let output = cmd
-            .arg("build_detect_platform")
-            .output()
-            .expect("failed to execute process");
-        if output.status.success() {
-            let raw = String::from_utf8_lossy(&output.stdout);
-            if let Ok(ini) = ini::Ini::load_from_str(&raw) {
-                if let Some(section) = ini.section(None::<String>) {
-                    if let Some(flags_string) = section.get("PLATFORM_CXXFLAGS") {
-                        let flags: Vec<String> = flags_string
-                            .split(' ')
-                            .filter_map(|s| {
-                                if !s.is_empty()
-                                    && s != "-DZLIB"
-                                    && s != "-DBZIP2"
-                                    && s != "-DLZ4"
-                                    && s != "-DZSTD"
-                                    && s != "-DSNAPPY"
-                                    && s != "-DROCKSDB_BACKTRACE"
-                                {
-                                    Some(s.to_owned())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-                        return Some(flags);
-                    }
-                }
-            }
+        _ => {
+            println!(
+                "cargo:warning=unknown target architecture {arch}; C/C++ target-cpu flags not passed through"
+            );
         }
     }
-    None
 }
 
 fn link(name: &str, bundled: bool) {
@@ -109,6 +96,12 @@ fn bindgen_rocksdb() {
 
 fn build_rocksdb() {
     let target = env::var("TARGET").unwrap();
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+    let target_features_env = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+    let target_features: Vec<_> = target_features_env
+        .split(',')
+        .filter(|feature| !feature.is_empty())
+        .collect();
 
     let mut config = cc::Build::new();
     config.include("rocksdb/include/");
@@ -180,50 +173,71 @@ fn build_rocksdb() {
         .filter(|&file| file != "util/build_version.cc")
         .collect::<Vec<&'static str>>();
 
-    if let Some(flags) = get_flags_from_detect_platform_script() {
-        println!("PLATFORM_CXXFLAGS: {:?}", flags);
-        for flag in flags {
-            config.flag(&flag);
+    if cfg!(feature = "march-native") {
+        if !target.contains("msvc") {
+            config.flag_if_supported("-march=native");
         }
     } else {
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        if !cfg!(feature = "portable") {
-            if is_x86_feature_detected!("sse4.2") {
-                config.flag_if_supported("-msse4.2");
-                config.define("HAVE_SSE42", None);
-            }
-            if is_x86_feature_detected!("avx2") {
-                config.flag_if_supported("-mavx2");
-                config.define("HAVE_AVX2", None);
-            }
-            if is_x86_feature_detected!("bmi2") {
-                config.define("HAVE_BMI", None);
-            }
+        pass_through_target_cpu(&mut config, &target);
+    }
 
-            if !target.contains("android") {
-                if is_x86_feature_detected!("pclmulqdq") {
-                    config.define("HAVE_PCLMUL", None);
-                    config.flag_if_supported("-mpclmul");
-                }
+    if !target.contains("msvc") && target_arch == "x86_64" {
+        if target_features.contains(&"sse2") {
+            config.flag_if_supported("-msse2");
+        }
+        if target_features.contains(&"sse4.1") {
+            config.flag_if_supported("-msse4.1");
+        }
+        if target_features.contains(&"sse4.2") {
+            config.flag_if_supported("-msse4.2");
+        } else {
+            println!(
+                r#"cargo:warning=compiling without SSE4.2; CRC32C will be slower (set RUSTFLAGS="-Ctarget-cpu=..." to tune RocksDB)"#
+            );
+        }
+        if target_features.contains(&"avx2") {
+            config.flag_if_supported("-mavx2");
+        }
+        if target_features.contains(&"bmi1") || target_features.contains(&"bmi2") {
+            config.flag_if_supported("-mbmi");
+        }
+        if target_features.contains(&"lzcnt") {
+            config.flag_if_supported("-mlzcnt");
+        }
+        if !target.contains("android") && target_features.contains(&"pclmulqdq") {
+            config.flag_if_supported("-mpclmul");
+        }
+    } else if !target.contains("msvc") && target_arch == "aarch64" {
+        if target_features.contains(&"crc") && target_features.contains(&"aes") {
+            if get_target_cpu_flag().is_none() {
+                config.flag_if_supported("-march=armv8-a+crc+aes+crypto");
             }
+        } else {
+            println!(
+                r#"cargo:warning=building for aarch64 without CRC instructions; set RUSTFLAGS="-Ctarget-cpu=..." to optimize RocksDB"#
+            );
         }
-        if target.contains("darwin") {
-            config.define("OS_MACOSX", None);
-            config.define("ROCKSDB_PLATFORM_POSIX", None);
-            config.define("ROCKSDB_LIB_IO_POSIX", None);
-        } else if target.contains("android") {
-            config.define("OS_ANDROID", None);
-            config.define("ROCKSDB_PLATFORM_POSIX", None);
-            config.define("ROCKSDB_LIB_IO_POSIX", None);
-        } else if target.contains("linux") {
-            config.define("OS_LINUX", None);
-            config.define("ROCKSDB_PLATFORM_POSIX", None);
-            config.define("ROCKSDB_LIB_IO_POSIX", None);
-        } else if target.contains("freebsd") {
-            config.define("OS_FREEBSD", None);
-            config.define("ROCKSDB_PLATFORM_POSIX", None);
-            config.define("ROCKSDB_LIB_IO_POSIX", None);
-        }
+    }
+
+    if target.contains("darwin") {
+        config.define("OS_MACOSX", None);
+        config.define("ROCKSDB_PLATFORM_POSIX", None);
+        config.define("ROCKSDB_LIB_IO_POSIX", None);
+    } else if target.contains("android") {
+        config.define("OS_ANDROID", None);
+        config.define("ROCKSDB_PLATFORM_POSIX", None);
+        config.define("ROCKSDB_LIB_IO_POSIX", None);
+    } else if target.contains("linux") {
+        config.define("OS_LINUX", None);
+        config.define("ROCKSDB_PLATFORM_POSIX", None);
+        config.define("ROCKSDB_LIB_IO_POSIX", None);
+    } else if target.contains("freebsd") {
+        config.define("OS_FREEBSD", None);
+        config.define("ROCKSDB_PLATFORM_POSIX", None);
+        config.define("ROCKSDB_LIB_IO_POSIX", None);
+    }
+
+    if !target.contains("msvc") {
         config.flag(cxx_standard());
     }
 
@@ -499,6 +513,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=rocksdb/");
     println!("cargo:rerun-if-changed=patches/");
+    println!("cargo:rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
     fail_on_empty_directory("rocksdb");
     build_rocksdb();
 
