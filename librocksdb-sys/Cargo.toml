@@ -28,6 +28,7 @@ exclude = [
 default = [ "static" ]
 portable = []
 march-native = []
+mt_static = []
 jemalloc = []
 io-uring = []
 static = []
