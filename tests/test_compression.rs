@@ -1,5 +1,3 @@
-#![cfg(all(feature = "snappy", feature = "lz4"))]
-
 use ckb_rocksdb::{DB, DBCompressionType, Options, prelude::*};
 use std::{ffi::OsStr, path::Path};
 
@@ -12,6 +10,7 @@ fn sst_count(path: &Path) -> usize {
 }
 
 #[test]
+#[cfg(all(feature = "snappy", feature = "lz4"))]
 fn new_databases_default_to_lz4_and_explicit_options_take_precedence() {
     for codec in [DBCompressionType::Lz4, DBCompressionType::Snappy] {
         let directory = tempfile::tempdir().unwrap();
@@ -48,6 +47,7 @@ fn new_databases_default_to_lz4_and_explicit_options_take_precedence() {
 }
 
 #[test]
+#[cfg(all(feature = "snappy", feature = "lz4"))]
 fn snappy_ssts_remain_readable_after_switching_new_writes_to_lz4() {
     let directory = tempfile::tempdir().unwrap();
     let value = vec![b'x'; 8192];
@@ -75,5 +75,38 @@ fn snappy_ssts_remain_readable_after_switching_new_writes_to_lz4() {
     let db = DB::open(&lz4, directory.path()).unwrap();
     for key in [b"legacy".as_slice(), b"new".as_slice()] {
         assert_eq!(db.get(key).unwrap().unwrap().as_ref(), value.as_slice());
+    }
+}
+
+#[test]
+fn enabled_codecs_round_trip_flushed_ssts() {
+    for codec in [
+        DBCompressionType::None,
+        #[cfg(feature = "snappy")]
+        DBCompressionType::Snappy,
+        #[cfg(feature = "lz4")]
+        DBCompressionType::Lz4,
+        #[cfg(feature = "lz4")]
+        DBCompressionType::Lz4hc,
+        #[cfg(feature = "zstd")]
+        DBCompressionType::Zstd,
+        #[cfg(feature = "zlib")]
+        DBCompressionType::Zlib,
+        #[cfg(feature = "bzip2")]
+        DBCompressionType::Bz2,
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let value = vec![b'x'; 16384];
+        let mut options = Options::default();
+        options.create_if_missing(true);
+        options.set_compression_type(codec);
+        {
+            let db = DB::open(&options, directory.path()).unwrap();
+            db.put(b"key", &value).unwrap();
+            db.flush().unwrap();
+        }
+        assert!(sst_count(directory.path()) > 0);
+        let db = DB::open(&Options::default(), directory.path()).unwrap();
+        assert_eq!(db.get(b"key").unwrap().unwrap().as_ref(), value.as_slice());
     }
 }

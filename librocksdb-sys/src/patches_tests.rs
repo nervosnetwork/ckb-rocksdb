@@ -12,7 +12,7 @@ fn error_message(ptr: *const libc::c_char) -> String {
 #[test]
 fn rocksdb_options_load_from_file() {
     let mut errmsg: *mut libc::c_char = ptr::null_mut();
-    let config_file = "rocksdb/tools/advisor/test/input_files/OPTIONS-000005";
+    let config_file = "tests/memory/OPTIONS";
     let result = unsafe {
         let config_cstring = ffi::CString::new(config_file.as_bytes()).unwrap();
         let env = crate::rocksdb_create_default_env();
@@ -37,5 +37,6 @@ fn rocksdb_options_load_from_file() {
     assert!(!result.cf_descs.is_null());
     unsafe {
         crate::rocksdb_column_family_descriptors_destroy(result.cf_descs);
+        crate::rocksdb_options_destroy(result.db_opts);
     }
 }

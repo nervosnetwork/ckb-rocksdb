@@ -475,6 +475,15 @@ fn ffi() {
         let mut err: *mut c_char = ptr::null_mut();
         let run: c_int = -1;
 
+        #[cfg(all(feature = "jemalloc", target_os = "linux", target_env = "gnu"))]
+        {
+            StartPhase("linked_jemalloc");
+            let allocator = rocksdb_jemalloc_nodump_allocator_create(&mut err);
+            CheckNoError!(err);
+            assert!(!allocator.is_null());
+            rocksdb_memory_allocator_destroy(allocator);
+        }
+
         let test_uuid = Uuid::new_v4().simple();
 
         let dbname = {

@@ -1,20 +1,21 @@
 [package]
 name = "ckb-rocksdb"
 description = "Rust wrapper for Facebook's RocksDB embeddable database"
-version = "0.24.0"
+version = "1.0.0"
 edition = "2024"
 authors = ["Tyler Neely <t@jujit.su>", "David Greenberg <dsg123456789@gmail.com>", "Nervos Core Dev <dev@nervos.org>"]
 license = "Apache-2.0"
 keywords = ["database", "embedded", "LSM-tree", "persistence"]
 repository = "https://github.com/nervosnetwork/ckb-rocksdb"
-exclude = [
-    ".gitignore",
-    "*.yml",
-    "tests",
-    "*.md",
-    "benches",
-]
+readme = "README.md"
+documentation = "https://docs.rs/ckb-rocksdb"
+categories = ["database"]
+include = ["src/**", "tests/**", "benches/**", "LICENSE", "README.md", "CHANGELOG.md"]
 rust-version = "1.95.0"
+
+[workspace]
+members = ["librocksdb-sys"]
+resolver = "3"
 
 [features]
 default = ["snappy", "lz4", "zstd", "zlib", "bzip2"]
@@ -33,15 +34,14 @@ lto = ["librocksdb-sys/lto"]
 rtti = ["librocksdb-sys/rtti"]
 
 [dependencies]
-home = "0.5"
-libc = "0.2"
+libc = "0.2.189"
 librocksdb-sys = { package = "ckb-librocksdb-sys", path = "librocksdb-sys", version = "=11.8.1" }
-tempfile = "3"
-serde = { version = "1", features = ["derive"], optional = true }
+tempfile = "3.27.0"
+serde = { version = "1.0.229", features = ["derive"], optional = true }
 
 [dev-dependencies]
-trybuild = "1.0"
-criterion = "0.7"
+trybuild = "1.0.121"
+criterion = "0.8.2"
 
 [[bench]]
 name = "transaction"
