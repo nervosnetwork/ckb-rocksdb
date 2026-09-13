@@ -137,7 +137,7 @@ pub enum IteratorMode<'a> {
 impl DBRawIterator<'_> {
     /// Return an I/O or corruption error that stopped this iterator, if any.
     /// Call this after reaching the end to distinguish errors from normal exhaustion.
-    pub fn status(&self) -> Result<(), crate::Error> {
+    pub fn status(&self) -> Result<(), Error> {
         unsafe {
             ffi_try!(ffi::rocksdb_iter_get_error(self.inner,));
         }
@@ -392,7 +392,7 @@ impl Drop for DBRawIterator<'_> {
 
 impl DBIterator<'_> {
     /// Return an I/O or corruption error that stopped this iterator, if any.
-    pub fn status(&self) -> Result<(), crate::Error> {
+    pub fn status(&self) -> Result<(), Error> {
         self.raw.status()
     }
     pub fn set_mode(&mut self, mode: IteratorMode) {

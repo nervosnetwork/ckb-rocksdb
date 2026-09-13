@@ -217,13 +217,9 @@ impl Env {
             ffi::rocksdb_env_lower_high_priority_thread_pool_cpu_priority(self.0.inner);
         }
     }
-
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct OptionsMustOutliveDB {
     pub(crate) env: Option<Env>,
     pub(crate) row_cache: Option<Cache>,
@@ -248,30 +244,11 @@ impl OptionsMustOutliveDB {
         };
         resources(self) == resources(other)
     }
-
-    pub(crate) fn clone(&self) -> Self {
-        Self {
-            env: self.env.as_ref().map(Env::clone),
-            row_cache: self.row_cache.clone(),
-            block_based: self
-                .block_based
-                .as_ref()
-                .map(BlockBasedOptionsMustOutliveDB::clone),
-        }
-    }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct BlockBasedOptionsMustOutliveDB {
     block_cache: Option<Cache>,
-}
-
-impl BlockBasedOptionsMustOutliveDB {
-    fn clone(&self) -> Self {
-        Self {
-            block_cache: self.block_cache.clone(),
-        }
-    }
 }
 
 /// Database-wide options around performance and behavior.
@@ -1059,8 +1036,9 @@ impl Options {
 
     /// Sets the compression algorithm that will be used for compressing blocks.
     ///
-    /// Default: `DBCompressionType::Snappy` (`DBCompressionType::None` if
-    /// snappy feature is not enabled).
+    /// Default: `DBCompressionType::Lz4`, falling back to
+    /// `DBCompressionType::Snappy` or `DBCompressionType::None` when the
+    /// corresponding compression features are not enabled.
     ///
     /// # Examples
     ///
@@ -2327,22 +2305,9 @@ impl Options {
         }
     }
 
-    /// If true, then DB::Open() will not fetch and check sizes of all sst files.
-    /// This may significantly speed up startup if there are many sst files,
-    /// especially when using non-default Env with expensive GetFileSize().
-    /// We'll still check that all required sst files exist.
-    /// If paranoid_checks is false, this option is ignored, and sst files are
-    /// not checked at all.
-    ///
-    /// Default: false
-    pub fn set_skip_checking_sst_file_sizes_on_db_open(&mut self, value: bool) {
-        unsafe {
-            ffi::rocksdb_options_set_skip_checking_sst_file_sizes_on_db_open(
-                self.inner,
-                value as c_uchar,
-            );
-        }
-    }
+    /// Retained for source compatibility. This option has had no effect since RocksDB 10.5.
+    #[deprecated(since = "0.24.0", note = "RocksDB has ignored this option since 10.5")]
+    pub fn set_skip_checking_sst_file_sizes_on_db_open(&mut self, _value: bool) {}
 
     /// The total maximum size(bytes) of write buffers to maintain in memory
     /// including copies of buffers that have already been flushed. This parameter

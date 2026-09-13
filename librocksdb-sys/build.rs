@@ -6,64 +6,59 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const RUST_TARGET: &str = "1.89.0";
+const RUST_TARGET: &str = "1.95.0";
 // On these platforms jemalloc-sys will use a prefixed jemalloc which cannot be linked together
 // with RocksDB.
 // See https://github.com/tikv/jemallocator/blob/tikv-jemalloc-sys-0.5.3/jemalloc-sys/src/env.rs#L25
 const NO_JEMALLOC_TARGETS: &[&str] = &["android", "dragonfly", "musl", "darwin"];
 
 fn get_flags_from_detect_platform_script() -> Option<Vec<String>> {
-    if !cfg!(target_os = "windows") {
-        let mut cmd = Command::new("bash");
-
-        // if ROCKSDB_USE_IO_URING is not set, treat as enable
-        // we use pkg_config probe library, more friendly for rust.
-        cmd.env("ROCKSDB_USE_IO_URING", "0");
-
-        if cfg!(feature = "static") {
-            cmd.env("LIB_MODE", "static");
-        }
-
-        if cfg!(feature = "portable") {
-            cmd.env("PORTABLE", "1");
-        } else if !cfg!(feature = "march-native") {
-            cmd.env("PORTABLE", "1");
-            cmd.env("USE_SSE", "1");
-        }
-
-        let output = cmd
-            .arg("build_detect_platform")
-            .output()
-            .expect("failed to execute process");
-        if output.status.success() {
-            let raw = String::from_utf8_lossy(&output.stdout);
-            if let Ok(ini) = ini::Ini::load_from_str(&raw) {
-                if let Some(section) = ini.section(None::<String>) {
-                    if let Some(flags_string) = section.get("PLATFORM_CXXFLAGS") {
-                        let flags: Vec<String> = flags_string
-                            .split(' ')
-                            .filter_map(|s| {
-                                if !s.is_empty()
-                                    && s != "-DZLIB"
-                                    && s != "-DBZIP2"
-                                    && s != "-DLZ4"
-                                    && s != "-DZSTD"
-                                    && s != "-DSNAPPY"
-                                    && s != "-DROCKSDB_BACKTRACE"
-                                {
-                                    Some(s.to_owned())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-                        return Some(flags);
-                    }
-                }
-            }
-        }
+    if cfg!(target_os = "windows") {
+        return None;
     }
-    None
+    let source = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR")?).join("rocksdb");
+    let output_dir = PathBuf::from(env::var_os("OUT_DIR")?);
+    // Probes write temporary files in their working directory. Keep them out of
+    // watched sources; the upstream version helper needs these relative paths.
+    for file in ["build_tools/version.sh", "include/rocksdb/version.h"] {
+        let destination = output_dir.join(file);
+        fs::create_dir_all(destination.parent()?).ok()?;
+        fs::copy(source.join(file), destination).ok()?;
+    }
+    let output_path = output_dir.join("rocksdb-platform.mk");
+    let mut command = Command::new("bash");
+    command
+        .current_dir(&output_dir)
+        .arg(source.join("build_tools/build_detect_platform"))
+        .arg(&output_path)
+        .env("ROCKSDB_ROOT", &source)
+        // Compression and io-uring libraries are selected by Cargo features.
+        .env("ROCKSDB_USE_IO_URING", "0");
+    if cfg!(feature = "static") {
+        command.env("LIB_MODE", "static");
+    }
+    if !cfg!(feature = "march-native") {
+        // Keep the portable baseline; upstream USE_SSE now implies Haswell.
+        command.env("PORTABLE", "1").env_remove("USE_SSE");
+    }
+    if !command.output().ok()?.status.success() {
+        return None;
+    }
+    let output = fs::read_to_string(output_path).ok()?;
+    let config = ini::Ini::load_from_str(&output).ok()?;
+    let flags = config.section(None::<String>)?.get("PLATFORM_CXXFLAGS")?;
+    Some(
+        flags
+            .split_whitespace()
+            .filter(|flag| {
+                !matches!(
+                    *flag,
+                    "-DZLIB" | "-DBZIP2" | "-DLZ4" | "-DZSTD" | "-DSNAPPY" | "-DROCKSDB_BACKTRACE"
+                )
+            })
+            .map(str::to_owned)
+            .collect(),
+    )
 }
 
 fn link(name: &str, bundled: bool) {
@@ -225,10 +220,6 @@ fn build_rocksdb() {
             config.define("ROCKSDB_LIB_IO_POSIX", None);
         }
         config.flag(cxx_standard());
-    }
-
-    if target.contains("aarch64") {
-        lib_sources.push("util/crc32c_arm64.cc")
     }
 
     if target.contains("windows") {
@@ -497,6 +488,8 @@ fn main() {
     bindgen_rocksdb();
 
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build_version.cc");
+    println!("cargo:rerun-if-changed=rocksdb_lib_sources.txt");
     println!("cargo:rerun-if-changed=rocksdb/");
     println!("cargo:rerun-if-changed=patches/");
     fail_on_empty_directory("rocksdb");

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.24.0 (unreleased)
+
+* Require Rust 1.95.0 for the bindings, native bindings generator, and CI.
+
+* Upgrade native RocksDB to 11.8.1, with bundled Snappy 1.2.2 and LZ4 1.10.0. Use upstream platform detection in the Cargo output directory.
+* Add owned column families, iterator error reporting and WAL flushing for online Freezer collection; keep database resources alive through CF retirement, snapshots and pinned reads.
+* Keep `Options::set_skip_checking_sst_file_sizes_on_db_open` as a deprecated no-op for source compatibility, and adapt the prefix-transform callback to the current C API.
+* Use owned handles to release a partially created CF batch on error, and derive resource cloning instead of maintaining duplicate implementations.
+* The default compression is now LZ4. Existing Snappy/LZ4 SSTs remain readable; SST format versions below 2 require compaction with an older engine before upgrading.
+
 ## 0.12.2 (2019-05-03)
 
 ### Changes

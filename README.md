@@ -10,6 +10,7 @@ A high-performance RocksDB wrapper tailored for Nervos CKB (Common Knowledge Bas
 
 ## Requirements
 
+- Rust 1.95.0 or newer
 - Clang and LLVM
 
 ## Contributing
@@ -27,6 +28,12 @@ compression submodules:
     git submodule update --init --recursive
 
 ## Compression Support
+
+New SSTs use LZ4 by default when available. Existing SSTs remain readable when
+their compression codecs are enabled; keep Snappy enabled when upgrading a
+database that contains Snappy-compressed SSTs. Explicit compression options
+continue to take precedence.
+
 By default, support for the [Snappy](https://github.com/google/snappy),
 [LZ4](https://github.com/lz4/lz4), [Zstd](https://github.com/facebook/zstd),
 [Zlib](https://zlib.net), and [Bzip2](http://www.bzip.org) compression

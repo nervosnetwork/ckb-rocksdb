@@ -170,26 +170,6 @@ impl Drop for OptimisticTransactionDB {
     }
 }
 
-// impl TransactionBegin for OptimisticTransactionDB {
-//     type WriteOptions = WriteOptions;
-//     type TransactionOptions = OptimisticTransactionOptions;
-//     fn transaction(
-//         &self,
-//         write_options: &WriteOptions,
-//         tx_options: &OptimisticTransactionOptions,
-//     ) -> Transaction<OptimisticTransactionDB> {
-//         unsafe {
-//             let inner = ffi::rocksdb_optimistictransaction_begin(
-//                 self.inner,
-//                 write_options.handle(),
-//                 tx_options.inner,
-//                 ptr::null_mut(),
-//             );
-//             Transaction::new(inner)
-//         }
-//     }
-// }
-
 pub struct OptimisticTransactionOptions {
     pub inner: *mut ffi::rocksdb_optimistictransaction_options_t,
 }

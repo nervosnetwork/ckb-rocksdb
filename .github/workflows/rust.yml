@@ -13,7 +13,7 @@ jobs:
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.89.0
+          toolchain: 1.95.0
           components: rustfmt
       - name: Check formatting
         run: |
@@ -30,7 +30,7 @@ jobs:
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.89.0
+          toolchain: 1.95.0
           components: clippy rustfmt
       - run: sudo apt update && sudo apt install -y libclang-dev
       - name: Run clippy
@@ -86,7 +86,7 @@ jobs:
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.89.0
+          toolchain: 1.95.0
           target: ${{ matrix.target }}
           components: rustfmt
       - name: Remove msys64 # Workaround to resolve link error with C:\msys64\mingw64\bin\libclang.dll

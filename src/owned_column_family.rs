@@ -154,8 +154,8 @@ impl OptimisticTransactionDB {
         let mut length = 0;
         // The native result includes every successfully created handle even on
         // error. The array and its handles have separate ownership.
-        let handles = unsafe {
-            let array = ffi::rocksdb_create_column_families(
+        let columns = unsafe {
+            let handles = ffi::rocksdb_create_column_families(
                 self.base_db_ptr(),
                 options.inner,
                 count,
@@ -163,26 +163,24 @@ impl OptimisticTransactionDB {
                 &mut length,
                 &mut error,
             );
-            let handles: Vec<_> = (0..length).map(|i| *array.add(i)).collect();
-            ffi::rocksdb_create_column_families_destroy(array);
-            handles
+            // Adopt the successful prefix immediately. On error these owners
+            // release the handles, while the native families remain in the DB.
+            let columns = (0..length)
+                .zip(names)
+                .map(|(index, name)| {
+                    Arc::new(OwnedColumnFamily {
+                        inner: ColumnFamily::new(*handles.add(index)),
+                        db: Arc::clone(self),
+                        name: name.as_ref().to_owned(),
+                    })
+                })
+                .collect();
+            ffi::rocksdb_create_column_families_destroy(handles);
+            columns
         };
         if !error.is_null() {
-            for handle in handles {
-                unsafe { ffi::rocksdb_column_family_handle_destroy(handle) }
-            }
             return Err(Error::new(crate::ffi_util::error_message(error)));
         }
-        Ok(handles
-            .into_iter()
-            .zip(names)
-            .map(|(handle, name)| {
-                Arc::new(OwnedColumnFamily {
-                    inner: ColumnFamily::new(handle),
-                    db: Arc::clone(self),
-                    name: name.as_ref().to_owned(),
-                })
-            })
-            .collect())
+        Ok(columns)
     }
 }

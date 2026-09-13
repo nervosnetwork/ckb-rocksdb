@@ -1,11 +1,11 @@
 error[E0597]: `db` does not live long enough
   --> tests/fail/checkpoint_outlive_db.rs:9:25
    |
-7  |     let _checkpoint = {
+ 7 |     let _checkpoint = {
    |         ----------- borrow later stored here
-8  |         let db = DB::open_default("foo").unwrap();
+ 8 |         let db = DB::open_default("foo").unwrap();
    |             -- binding `db` declared here
-9  |         Checkpoint::new(&db)
+ 9 |         Checkpoint::new(&db)
    |                         ^^^ borrowed value does not live long enough
 10 |     };
    |     - `db` dropped here while still borrowed

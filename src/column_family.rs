@@ -50,24 +50,14 @@ impl ColumnFamily {
         name: &std::ffi::CStr,
         options: &Options,
     ) -> Result<Self, Error> {
-        unsafe {
-            let mut error = std::ptr::null_mut();
-            let handle = ffi::rocksdb_create_column_family(
+        let handle = unsafe {
+            ffi_try!(ffi::rocksdb_create_column_family(
                 db.handle(),
                 options.inner,
                 name.as_ptr(),
-                &mut error,
-            );
-            if !error.is_null() {
-                // The C API allocates a wrapper even when CreateColumnFamily
-                // fails. Its null native rep is also safe to destroy.
-                if !handle.is_null() {
-                    ffi::rocksdb_column_family_handle_destroy(handle);
-                }
-                return Err(Error::new(crate::ffi_util::error_message(error)));
-            }
-            Ok(Self::new(handle))
-        }
+            ))
+        };
+        Ok(Self::new(handle))
     }
 }
 
