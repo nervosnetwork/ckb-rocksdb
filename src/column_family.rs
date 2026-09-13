@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{ColumnFamily, Options, handle::Handle};
+use crate::{ColumnFamily, Error, Options, handle::Handle};
 
 /// A descriptor for a RocksDB column family.
 ///
@@ -43,6 +43,31 @@ impl ColumnFamilyDescriptor {
 impl ColumnFamily {
     pub(crate) fn new(handle: *mut ffi::rocksdb_column_family_handle_t) -> ColumnFamily {
         ColumnFamily { inner: handle }
+    }
+
+    pub(crate) fn create(
+        db: &impl Handle<ffi::rocksdb_t>,
+        name: &std::ffi::CStr,
+        options: &Options,
+    ) -> Result<Self, Error> {
+        unsafe {
+            let mut error = std::ptr::null_mut();
+            let handle = ffi::rocksdb_create_column_family(
+                db.handle(),
+                options.inner,
+                name.as_ptr(),
+                &mut error,
+            );
+            if !error.is_null() {
+                // The C API allocates a wrapper even when CreateColumnFamily
+                // fails. Its null native rep is also safe to destroy.
+                if !handle.is_null() {
+                    ffi::rocksdb_column_family_handle_destroy(handle);
+                }
+                return Err(Error::new(crate::ffi_util::error_message(error)));
+            }
+            Ok(Self::new(handle))
+        }
     }
 }
 

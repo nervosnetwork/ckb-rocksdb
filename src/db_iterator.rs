@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 
-use crate::ops::Iterate;
+use crate::{Error, ops::Iterate};
 use libc::{c_char, c_uchar, size_t};
 use std::marker::PhantomData;
 use std::slice;
@@ -135,6 +135,14 @@ pub enum IteratorMode<'a> {
 }
 
 impl DBRawIterator<'_> {
+    /// Return an I/O or corruption error that stopped this iterator, if any.
+    /// Call this after reaching the end to distinguish errors from normal exhaustion.
+    pub fn status(&self) -> Result<(), crate::Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_iter_get_error(self.inner,));
+        }
+        Ok(())
+    }
     /// Returns true if the iterator is valid.
     pub fn valid(&self) -> bool {
         unsafe { ffi::rocksdb_iter_valid(self.inner) != 0 }
@@ -353,6 +361,25 @@ impl DBRawIterator<'_> {
             None
         }
     }
+
+    /// Returns the current key and value after a single validity check.
+    pub fn item(&self) -> Option<(&[u8], &[u8])> {
+        if !self.valid() {
+            return None;
+        }
+        // SAFETY: validity was checked above. Operations that move the iterator
+        // require an exclusive borrow, so both buffers remain valid for `self`.
+        unsafe {
+            let mut key_len = 0;
+            let mut value_len = 0;
+            let key = ffi::rocksdb_iter_key(self.inner, &mut key_len) as *const u8;
+            let value = ffi::rocksdb_iter_value(self.inner, &mut value_len) as *const u8;
+            Some((
+                slice::from_raw_parts(key, key_len),
+                slice::from_raw_parts(value, value_len),
+            ))
+        }
+    }
 }
 
 impl Drop for DBRawIterator<'_> {
@@ -364,6 +391,10 @@ impl Drop for DBRawIterator<'_> {
 }
 
 impl DBIterator<'_> {
+    /// Return an I/O or corruption error that stopped this iterator, if any.
+    pub fn status(&self) -> Result<(), crate::Error> {
+        self.raw.status()
+    }
     pub fn set_mode(&mut self, mode: IteratorMode) {
         match mode {
             IteratorMode::Start => {
@@ -410,15 +441,9 @@ impl Iterator for DBIterator<'_> {
             self.just_seeked = false;
         }
 
-        if self.raw.valid() {
-            // .key() and .value() only ever return None if valid == false, which we've just cheked
-            Some((
-                Box::from(self.raw.key().unwrap()),
-                Box::from(self.raw.value().unwrap()),
-            ))
-        } else {
-            None
-        }
+        self.raw
+            .item()
+            .map(|(key, value)| (Box::from(key), Box::from(value)))
     }
 }
 

@@ -231,6 +231,24 @@ pub struct OptionsMustOutliveDB {
 }
 
 impl OptionsMustOutliveDB {
+    pub(crate) fn same_resources(&self, other: &Self) -> bool {
+        let resources = |options: &Self| {
+            (
+                options.env.as_ref().map(|env| Arc::as_ptr(&env.0)),
+                options
+                    .row_cache
+                    .as_ref()
+                    .map(|cache| Arc::as_ptr(&cache.0)),
+                options
+                    .block_based
+                    .as_ref()
+                    .and_then(|block| block.block_cache.as_ref())
+                    .map(|cache| Arc::as_ptr(&cache.0)),
+            )
+        };
+        resources(self) == resources(other)
+    }
+
     pub(crate) fn clone(&self) -> Self {
         Self {
             env: self.env.as_ref().map(Env::clone),
@@ -3093,7 +3111,7 @@ impl WriteOptions {
         input: Option<&WriteOptions>,
         default_writeopts: &mut Option<WriteOptions>,
     ) -> Result<*mut ffi::rocksdb_writeoptions_t, Error> {
-        if default_writeopts.is_none() {
+        if input.is_none() && default_writeopts.is_none() {
             default_writeopts.replace(WriteOptions::default());
         }
 
@@ -3792,6 +3810,107 @@ impl Handle<ffi::rocksdb_ingestexternalfileoptions_t> for IngestExternalFileOpti
 #[cfg(test)]
 mod tests {
     use crate::{MemtableFactory, Options};
+
+    #[test]
+    fn owned_columns_retain_option_resources_until_database_closes() {
+        use super::{BlockBasedOptions, Cache, Env};
+        use crate::{
+            OptimisticTransactionDB, ReadOptions,
+            ops::{OpenCF, PutCF},
+        };
+        use std::sync::Arc;
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut options = Options::default();
+        options.create_if_missing(true);
+        let db = OptimisticTransactionDB::open_cf(&options, directory.path(), ["default"]).unwrap();
+        let (db, columns) = db.into_shared_columns();
+        let env = Env::default_env().unwrap();
+        let row_cache = Cache::new_lru_cache(1024 * 1024);
+        let block_cache = Cache::new_lru_cache(1024 * 1024);
+        let weak_env = Arc::downgrade(&env.0);
+        let weak_row = Arc::downgrade(&row_cache.0);
+        let weak_block = Arc::downgrade(&block_cache.0);
+        let mut block = BlockBasedOptions::default();
+        block.set_block_cache(&block_cache);
+        options.set_env(&env);
+        options.set_row_cache(&row_cache);
+        options.set_block_based_table_factory(&block);
+        let mut created = db.create_owned_cfs(&["owned", "peer"], &options).unwrap();
+        let column = created.remove(0);
+        drop(created);
+        drop((options, block, env, row_cache, block_cache));
+        db.put_cf(&column, b"key", b"value").unwrap();
+        let pin = column
+            .get_pinned(b"key", &ReadOptions::default())
+            .unwrap()
+            .unwrap();
+        assert_eq!(pin.as_ref(), b"value");
+        drop((pin, column));
+        // No handle or pin remains for the native CF, but it still belongs to DB.
+        assert!(weak_env.upgrade().is_some());
+        assert!(weak_row.upgrade().is_some());
+        assert!(weak_block.upgrade().is_some());
+        db.put_cf(&columns["default"], b"key", b"value").unwrap();
+        let pin = columns["default"]
+            .get_pinned(b"key", &ReadOptions::default())
+            .unwrap()
+            .unwrap();
+        drop((columns, db));
+        assert!(weak_env.upgrade().is_some());
+        assert!(weak_row.upgrade().is_some());
+        assert!(weak_block.upgrade().is_some());
+        assert_eq!(pin.as_ref(), b"value");
+        drop(pin);
+        assert!(weak_env.upgrade().is_none());
+        assert!(weak_row.upgrade().is_none());
+        assert!(weak_block.upgrade().is_none());
+    }
+
+    #[test]
+    fn invalid_owned_column_name_does_not_retain_options() {
+        use super::Cache;
+        use crate::{OptimisticTransactionDB, ops::OpenCF};
+        use std::sync::Arc;
+        let directory = tempfile::tempdir().unwrap();
+        let mut options = Options::default();
+        options.create_if_missing(true);
+        let db = OptimisticTransactionDB::open_cf(&options, directory.path(), ["default"]).unwrap();
+        let (db, _columns) = db.into_shared_columns();
+        let cache = Cache::new_lru_cache(1024);
+        let weak = Arc::downgrade(&cache.0);
+        options.set_row_cache(&cache);
+        assert!(db.create_owned_cf("invalid\0name", &options).is_err());
+        assert!(
+            db.create_owned_cfs(&["uncreated", "invalid\0name"], &options)
+                .is_err()
+        );
+        drop((cache, options));
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn partial_column_batch_keeps_option_resources_after_its_handles_are_released() {
+        use super::Cache;
+        use crate::{OptimisticTransactionDB, ops::OpenCF};
+        use std::sync::Arc;
+        let directory = tempfile::tempdir().unwrap();
+        let mut options = Options::default();
+        options.create_if_missing(true);
+        let db = OptimisticTransactionDB::open_cf(&options, directory.path(), ["default"]).unwrap();
+        let (db, columns) = db.into_shared_columns();
+        let cache = Cache::new_lru_cache(1024);
+        let weak = Arc::downgrade(&cache.0);
+        options.set_row_cache(&cache);
+        assert!(
+            db.create_owned_cfs(&["created", "default"], &options)
+                .is_err()
+        );
+        drop((cache, options));
+        assert!(weak.upgrade().is_some());
+        drop((columns, db));
+        assert!(weak.upgrade().is_none());
+    }
 
     #[test]
     fn test_enable_statistics() {

@@ -22,7 +22,7 @@ pub struct OptimisticTransactionDB {
     path: PathBuf,
     cfs: BTreeMap<String, ColumnFamily>,
     base_db: *mut ffi::rocksdb_t,
-    _outlive: Vec<OptionsMustOutliveDB>,
+    outlive: std::sync::Mutex<Vec<OptionsMustOutliveDB>>,
 }
 
 impl Handle<ffi::rocksdb_optimistictransactiondb_t> for OptimisticTransactionDB {
@@ -80,7 +80,7 @@ impl OpenRaw for OptimisticTransactionDB {
             cfs,
             path,
             base_db,
-            _outlive: outlive,
+            outlive: std::sync::Mutex::new(outlive),
         })
     }
 }
@@ -101,6 +101,21 @@ impl GetColumnFamilys for OptimisticTransactionDB {
 }
 
 impl OptimisticTransactionDB {
+    pub(crate) fn retain_options(&self, options: &Options) {
+        let mut retained = self
+            .outlive
+            .lock()
+            .expect("database resources lock poisoned");
+        // Repeated CF generations normally share the same cache and environment.
+        // Retain each resource combination once, including after a handle closes.
+        if !retained
+            .iter()
+            .any(|old| old.same_resources(&options.outlive))
+        {
+            retained.push(options.outlive.clone());
+        }
+    }
+
     pub fn path(&self) -> &Path {
         self.path.as_path()
     }

@@ -31,6 +31,7 @@ use crate::DB;
 pub struct DBPinnableSlice<'a> {
     ptr: *mut ffi::rocksdb_pinnableslice_t,
     db: PhantomData<&'a DB>,
+    pub(crate) column_family: Option<std::sync::Arc<crate::OwnedColumnFamily>>,
 }
 
 // Safety note: auto-implementing Send on most db-related types is prevented by the inner FFI
@@ -78,6 +79,7 @@ impl<'a> DBPinnableSlice<'a> {
         DBPinnableSlice {
             ptr,
             db: PhantomData,
+            column_family: None,
         }
     }
 }

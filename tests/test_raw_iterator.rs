@@ -32,6 +32,7 @@ pub fn test_forwards_iteration() {
         assert!(iter.valid());
         assert_eq!(iter.key(), Some(b"k1".as_ref()));
         assert_eq!(iter.value(), Some(b"v1".as_ref()));
+        assert_eq!(iter.item(), Some((b"k1".as_slice(), b"v1".as_slice())));
 
         iter.next();
 
@@ -46,6 +47,7 @@ pub fn test_forwards_iteration() {
         assert!(!iter.valid());
         assert_eq!(iter.key(), None);
         assert_eq!(iter.value(), None);
+        assert_eq!(iter.item(), None);
     }
 }
 
@@ -163,4 +165,63 @@ fn iterator_test_past_end() {
         assert!(iter.next().is_none());
         assert!(iter.next().is_none());
     }
+}
+
+#[test]
+fn iterator_status_reports_corrupt_data_block() {
+    use rocksdb::{DBCompressionType, IteratorMode};
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    let directory = tempfile::tempdir().unwrap();
+    let mut options = Options::default();
+    options.create_if_missing(true);
+    options.set_compression_type(DBCompressionType::None);
+    options.set_disable_auto_compactions(true);
+    let mut table_options = rocksdb::BlockBasedOptions::default();
+    table_options.disable_cache();
+    options.set_block_based_table_factory(&table_options);
+    {
+        let db = DB::open(&options, directory.path()).unwrap();
+        for key in 0..128u32 {
+            db.put(key.to_be_bytes(), [0x5a; 1024]).unwrap();
+        }
+        db.flush().unwrap();
+        let mut iterator = db.iterator(IteratorMode::Start);
+        assert_eq!(iterator.by_ref().count(), 128);
+        iterator.status().unwrap();
+    }
+    let tables: Vec<_> = std::fs::read_dir(directory.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "sst"))
+        .collect();
+    assert_eq!(tables.len(), 1);
+    let mut table = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&tables[0])
+        .unwrap();
+    // Preserve SST metadata so open succeeds, but invalidate the first data block.
+    let mut byte = [0];
+    table.seek(SeekFrom::Start(32)).unwrap();
+    table.read_exact(&mut byte).unwrap();
+    byte[0] ^= 1;
+    table.seek(SeekFrom::Start(32)).unwrap();
+    table.write_all(&byte).unwrap();
+    table.sync_all().unwrap();
+    drop(table);
+    let db = DB::open(&options, directory.path()).unwrap();
+    let mut raw = db.raw_iterator();
+    raw.seek_to_first();
+    assert!(!raw.valid());
+    assert!(raw.status().unwrap_err().to_string().contains("Corruption"));
+    let mut iterator = db.iterator(IteratorMode::Start);
+    assert!(iterator.next().is_none());
+    assert!(
+        iterator
+            .status()
+            .unwrap_err()
+            .to_string()
+            .contains("Corruption")
+    );
 }

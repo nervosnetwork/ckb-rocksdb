@@ -58,7 +58,7 @@ pub use self::columnfamily::CreateCF;
 pub use self::columnfamily::DropCF;
 pub use self::columnfamily::GetColumnFamilys;
 pub use self::compact::{CompactRange, CompactRangeCF};
-pub use self::flush::Flush;
+pub use self::flush::{Flush, FlushWal};
 pub use self::iter::{Iterate, IterateCF};
 pub use self::property::{GetProperty, GetPropertyCF};
 pub use self::setoptions::SetOptions;
