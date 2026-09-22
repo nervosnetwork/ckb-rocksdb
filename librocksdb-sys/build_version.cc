@@ -8,9 +8,9 @@
 
 // Pinned to the RocksDB gitlink so packaged builds report the same source
 // revision and timestamp, independently of the build host or Git availability.
-static const std::string rocksdb_build_git_sha = "rocksdb_build_git_sha:06829eccbaaea93632f84d82e5b4352f8edcd497";
+static const std::string rocksdb_build_git_sha = "rocksdb_build_git_sha:4a81bc19c56b41e713bdd8ac2b7fdd076995c791";
 static const std::string rocksdb_build_git_tag = "rocksdb_build_git_tag:";
-static const std::string rocksdb_build_date = "rocksdb_build_date:2026-09-23 00:39:59+08:00";
+static const std::string rocksdb_build_date = "rocksdb_build_date:2026-09-23 02:39:12+08:00";
 
 std::unordered_map<std::string, ROCKSDB_NAMESPACE::RegistrarFunc> ROCKSDB_NAMESPACE::ObjectRegistry::builtins_ = {
 
