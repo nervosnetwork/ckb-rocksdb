@@ -8,6 +8,7 @@ rocksdb_lib_sources.txt: rocksdb/src.mk
 gen_lib_sources: rocksdb_lib_sources.txt
 
 .PHONY: gen_lib_sources test
+# The allocation test overrides operator new; Valgrind must retain its injection.
 test:
 	@set -euo pipefail; \
 	output=$$(cargo build -p ckb-librocksdb-sys --locked --message-format=json | \
@@ -20,5 +21,6 @@ test:
 		--error-exitcode=1 "$$output/memory-test"; \
 	$(CXX) -g -std=c++17 -I . tests/memory/options_allocation_failure.cc \
 		"$$output/librocksdb.a" -lpthread -ldl -lm -lstdc++ -o "$$output/allocation-test"; \
-	valgrind --leak-check=full --errors-for-leak-kinds=definite,indirect \
+	valgrind --soname-synonyms=somalloc=nouserintercepts \
+		--leak-check=full --errors-for-leak-kinds=definite,indirect \
 		--error-exitcode=1 "$$output/allocation-test" tests/memory/OPTIONS

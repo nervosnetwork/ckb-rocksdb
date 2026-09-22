@@ -192,11 +192,9 @@ fn build_rocksdb() {
                 config.define("HAVE_BMI", None);
             }
 
-            if !target.contains("android") {
-                if is_x86_feature_detected!("pclmulqdq") {
-                    config.define("HAVE_PCLMUL", None);
-                    config.flag_if_supported("-mpclmul");
-                }
+            if !target.contains("android") && is_x86_feature_detected!("pclmulqdq") {
+                config.define("HAVE_PCLMUL", None);
+                config.flag_if_supported("-mpclmul");
             }
         }
         if target.contains("darwin") {
