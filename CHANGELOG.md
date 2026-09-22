@@ -15,6 +15,7 @@
 * Add owned column families, iterator error reporting and WAL flushing for online Freezer collection; keep database resources alive through CF retirement, snapshots and pinned reads.
 * Keep WAL reclamation progressing when the last column family needing an old log is dropped; advance recovery metadata through the normal flush path, including an empty default CF.
 * Keep `Options::set_skip_checking_sst_file_sizes_on_db_open` as a deprecated no-op for source compatibility, and adapt the prefix-transform callback to the current C API.
+* Capture each CF name once so Rust handles and native column families cannot diverge when `AsRef` returns changing values.
 * Use owned handles to release a partially created CF batch on error, and derive resource cloning instead of maintaining duplicate implementations.
 * The default compression is now LZ4. Existing Snappy/LZ4 SSTs remain readable; SST format versions below 2 require compaction with an older engine before upgrading.
 

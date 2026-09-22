@@ -219,3 +219,29 @@ fn column_batches_keep_order_and_partial_failures_keep_the_created_prefix() {
         );
     }
 }
+
+#[test]
+fn column_batch_names_match_the_names_passed_to_rocksdb() {
+    struct Name(std::cell::Cell<usize>);
+    impl AsRef<str> for Name {
+        fn as_ref(&self) -> &str {
+            let calls = self.0.get();
+            self.0.set(calls + 1);
+            if calls == 0 { "requested" } else { "changed" }
+        }
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let mut options = Options::default();
+    options.create_if_missing(true);
+    let db = OptimisticTransactionDB::open_cf(&options, directory.path(), ["default"]).unwrap();
+    let (db, columns) = db.into_shared_columns();
+    let names = [Name(std::cell::Cell::new(0))];
+    let created = db.create_owned_cfs(&names, &options).unwrap();
+    assert_eq!(created[0].name(), "requested");
+    assert_eq!(names[0].0.get(), 1);
+    drop((created, columns, db));
+    let mut persisted = ckb_rocksdb::DB::list_cf(&options, directory.path()).unwrap();
+    persisted.sort();
+    assert_eq!(persisted, ["default", "requested"]);
+}

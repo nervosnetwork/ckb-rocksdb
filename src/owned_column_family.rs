@@ -186,12 +186,15 @@ impl OptimisticTransactionDB {
             // Adopt the successful prefix immediately. On error these owners
             // release the handles, while the native families remain in the DB.
             let columns = (0..length)
-                .zip(names)
+                .zip(c_names)
                 .map(|(index, name)| {
                     Arc::new(OwnedColumnFamily {
                         inner: ColumnFamily::new(*handles.add(index)),
                         db: Arc::clone(self),
-                        name: name.as_ref().to_owned(),
+                        // Reuse the exact UTF-8 name passed to RocksDB.
+                        name: name
+                            .into_string()
+                            .expect("CF name was constructed from str"),
                     })
                 })
                 .collect();

@@ -32,8 +32,9 @@ impl DBWithTTL {
         ttl: i32,
     ) -> Result<(), Error> {
         opts.outlive.retain_in(&mut self._outlive);
+        let name = name.as_ref();
         let cname = to_cstring(
-            name.as_ref(),
+            name,
             "Failed to convert path to CString when opening rocksdb",
         )?;
         unsafe {
@@ -45,7 +46,7 @@ impl DBWithTTL {
             ));
 
             self.get_mut_cfs()
-                .insert(name.as_ref().to_string(), ColumnFamily::new(cf_handle));
+                .insert(name.to_owned(), ColumnFamily::new(cf_handle));
         };
         Ok(())
     }

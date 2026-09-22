@@ -31,12 +31,12 @@ where
     T: Handle<ffi::rocksdb_t> + super::Write + GetColumnFamilys + crate::db_options::RetainOptions,
 {
     fn create_cf<N: AsRef<str>>(&mut self, name: N, opts: &Options) -> Result<(), Error> {
-        let c_name =
-            crate::ffi_util::to_cstring(name.as_ref(), "column family name contains a NUL byte")?;
+        let name = name.as_ref();
+        let c_name = crate::ffi_util::to_cstring(name, "column family name contains a NUL byte")?;
         self.retain_options(opts);
         let column = ColumnFamily::create(self, &c_name, opts)?;
         // The new family remains owned by this database.
-        unsafe { self.get_mut_cfs() }.insert(name.as_ref().to_owned(), column);
+        unsafe { self.get_mut_cfs() }.insert(name.to_owned(), column);
         Ok(())
     }
 }

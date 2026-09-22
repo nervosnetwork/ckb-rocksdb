@@ -237,3 +237,56 @@ fn test_create_duplicate_column_family() {
         assert!(db.create_cf("cf1", &opts).is_err());
     }
 }
+
+#[test]
+fn created_column_names_match_the_native_name_for_each_database_kind() {
+    use rocksdb::{DBWithTTL, OptimisticTransactionDB, TransactionDB};
+    use std::cell::Cell;
+
+    struct Name(Cell<usize>);
+    impl AsRef<str> for Name {
+        fn as_ref(&self) -> &str {
+            let calls = self.0.get();
+            self.0.set(calls + 1);
+            if calls == 0 { "requested" } else { "changed" }
+        }
+    }
+
+    fn assert_name(db: &impl GetColumnFamilys, name: &Name) {
+        assert!(db.cf_handle("requested").is_some());
+        assert!(db.cf_handle("changed").is_none());
+        assert_eq!(name.0.get(), 1);
+    }
+
+    fn create(db: &mut (impl CreateCF + GetColumnFamilys), options: &Options) {
+        let name = Name(Cell::new(0));
+        db.create_cf(&name, options).unwrap();
+        assert_name(db, &name);
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let mut options = Options::default();
+    options.create_if_missing(true);
+    create(
+        &mut DB::open(&options, directory.path().join("plain")).unwrap(),
+        &options,
+    );
+    create(
+        &mut OptimisticTransactionDB::open(&options, directory.path().join("optimistic")).unwrap(),
+        &options,
+    );
+    create(
+        &mut TransactionDB::open(&options, directory.path().join("transaction")).unwrap(),
+        &options,
+    );
+    let mut ttl = DBWithTTL::open(&options, directory.path().join("ttl")).unwrap();
+    let name = Name(Cell::new(0));
+    ttl.create_cf_with_ttl(&name, &options, 60).unwrap();
+    assert_name(&ttl, &name);
+    drop(ttl);
+    for kind in ["plain", "optimistic", "transaction", "ttl"] {
+        let mut names = DB::list_cf(&options, directory.path().join(kind)).unwrap();
+        names.sort();
+        assert_eq!(names, ["default", "requested"], "{kind}");
+    }
+}

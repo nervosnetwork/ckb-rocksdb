@@ -548,8 +548,9 @@ impl MergeCF<WriteOptions> for TransactionDB {
 impl CreateCF for TransactionDB {
     fn create_cf<N: AsRef<str>>(&mut self, name: N, opts: &Options) -> Result<(), Error> {
         opts.outlive.retain_in(&mut self._outlive);
+        let name = name.as_ref();
         let cname = to_cstring(
-            name.as_ref(),
+            name,
             "Failed to convert path to CString when opening rocksdb",
         )?;
         unsafe {
@@ -560,7 +561,7 @@ impl CreateCF for TransactionDB {
             ));
 
             self.get_mut_cfs()
-                .insert(name.as_ref().to_string(), ColumnFamily::new(cf_handle));
+                .insert(name.to_owned(), ColumnFamily::new(cf_handle));
         };
         Ok(())
     }
