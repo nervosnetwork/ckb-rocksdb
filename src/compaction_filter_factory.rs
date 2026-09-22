@@ -1,4 +1,5 @@
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
+use std::sync::Mutex;
 
 use libc::{self, c_char, c_void};
 
@@ -16,7 +17,7 @@ use crate::{
 ///
 ///  [CompactionFilter]: ../compaction_filter/trait.CompactionFilter.html
 ///  [set_compaction_filter_factory]: ../struct.Options.html#method.set_compaction_filter_factory
-pub trait CompactionFilterFactory {
+pub trait CompactionFilterFactory: Send {
     type Filter: CompactionFilter;
 
     /// Returns a CompactionFilter for the compaction process
@@ -26,22 +27,36 @@ pub trait CompactionFilterFactory {
     fn name(&self) -> &CStr;
 }
 
-pub unsafe extern "C" fn destructor_callback<F>(raw_self: *mut c_void)
-where
-    F: CompactionFilterFactory,
-{
-    unsafe {
-        let _ = Box::from_raw(raw_self as *mut F);
+pub(crate) struct FactoryCallback<F> {
+    name: CString,
+    factory: Mutex<F>,
+}
+
+impl<F: CompactionFilterFactory> FactoryCallback<F> {
+    pub fn new(factory: F) -> Self {
+        Self {
+            name: factory.name().to_owned(),
+            factory: Mutex::new(factory),
+        }
     }
 }
 
-pub unsafe extern "C" fn name_callback<F>(raw_self: *mut c_void) -> *const c_char
+pub(crate) unsafe extern "C" fn destructor_callback<F>(raw_self: *mut c_void)
 where
     F: CompactionFilterFactory,
 {
     unsafe {
-        let self_ = &*(raw_self as *const c_void as *const F);
-        self_.name().as_ptr()
+        let _ = Box::from_raw(raw_self as *mut FactoryCallback<F>);
+    }
+}
+
+pub(crate) unsafe extern "C" fn name_callback<F>(raw_self: *mut c_void) -> *const c_char
+where
+    F: CompactionFilterFactory,
+{
+    unsafe {
+        let self_ = &*(raw_self as *const FactoryCallback<F>);
+        self_.name.as_ptr()
     }
 }
 
@@ -70,7 +85,7 @@ impl CompactionFilterContext {
     }
 }
 
-pub unsafe extern "C" fn create_compaction_filter_callback<F>(
+pub(crate) unsafe extern "C" fn create_compaction_filter_callback<F>(
     raw_self: *mut c_void,
     context: *mut ffi::rocksdb_compactionfiltercontext_t,
 ) -> *mut ffi::rocksdb_compactionfilter_t
@@ -78,9 +93,14 @@ where
     F: CompactionFilterFactory,
 {
     unsafe {
-        let self_ = &mut *(raw_self as *mut F);
+        let self_ = &*(raw_self as *mut FactoryCallback<F>);
         let context = CompactionFilterContext::from_raw(context);
-        let filter = Box::new(self_.create(context));
+        let filter = self_
+            .factory
+            .lock()
+            .expect("compaction factory lock poisoned")
+            .create(context);
+        let filter = Box::new(compaction_filter::FilterCallback::new(filter));
 
         let filter_ptr = Box::into_raw(filter);
 

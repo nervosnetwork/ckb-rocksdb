@@ -16,6 +16,13 @@ typedef struct {
 extern ROCKSDB_LIBRARY_API
     rocksdb_cache_t* rocksdb_null_cache();
 
+// Return NULL on allocation or construction failure; no C++ exception escapes.
+extern ROCKSDB_LIBRARY_API
+    rocksdb_env_t* rocksdb_create_default_env_checked();
+
+extern ROCKSDB_LIBRARY_API
+    rocksdb_cache_t* rocksdb_cache_create_lru_checked(size_t capacity);
+
 extern ROCKSDB_LIBRARY_API
     rocksdb_options_t* rocksdb_options_clone(rocksdb_options_t* options);
 
@@ -34,6 +41,8 @@ extern ROCKSDB_LIBRARY_API
 extern ROCKSDB_LIBRARY_API
     rocksdb_options_t* rocksdb_column_family_descriptors_options(const rocksdb_column_family_descriptors_t* cf_descs, int index);
 
+// On failure both payload pointers are NULL, even if allocating *errptr fails.
+// A successful load leaves an existing *errptr unchanged, as required by c.h.
 extern ROCKSDB_LIBRARY_API
     rocksdb_fulloptions_t rocksdb_options_load_from_file(
         const char* config_file,

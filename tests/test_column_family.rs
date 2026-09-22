@@ -130,46 +130,30 @@ fn test_create_missing_column_family() {
 }
 
 #[test]
-#[ignore]
 fn test_merge_operator() {
-    let n = TemporaryDBPath::new();
-    // TODO should be able to write, read, merge, batch, and iterate over a cf
-    {
-        let mut opts = Options::default();
-        opts.set_merge_operator_associative("test operator", test_provided_merge);
-        let db = match DB::open_cf(&opts, &n, ["cf1"]) {
-            Ok(db) => {
-                println!("successfully opened db with column family");
-                db
-            }
-            Err(e) => panic!("failed to open db with column family: {}", e),
-        };
-        let cf1 = db.cf_handle("cf1").unwrap();
-        assert!(db.put_cf(cf1, b"k1", b"v1").is_ok());
-        assert!(db.get_cf(cf1, b"k1").unwrap().unwrap().to_utf8().unwrap() == "v1");
-        let p = db.put_cf(cf1, b"k1", b"a");
-        assert!(p.is_ok());
-        db.merge_cf(cf1, b"k1", b"b").unwrap();
-        db.merge_cf(cf1, b"k1", b"c").unwrap();
-        db.merge_cf(cf1, b"k1", b"d").unwrap();
-        db.merge_cf(cf1, b"k1", b"efg").unwrap();
-        let m = db.merge_cf(cf1, b"k1", b"h");
-        println!("m is {:?}", m);
-        // TODO assert!(m.is_ok());
-        match db.get(b"k1") {
-            Ok(Some(value)) => match value.to_utf8() {
-                Some(v) => println!("retrieved utf8 value: {}", v),
-                None => println!("did not read valid utf-8 out of the db"),
-            },
-            Err(_) => println!("error reading value"),
-            _ => panic!("value not present!"),
-        }
-
-        let _ = db.get_cf(cf1, b"k1");
-        // TODO assert!(r.unwrap().to_utf8().unwrap() == "abcdefgh");
-        assert!(db.delete(b"k1").is_ok());
-        assert!(db.get(b"k1").unwrap().is_none());
-    }
+    let path = TemporaryDBPath::new();
+    let mut options = Options::default();
+    options.create_if_missing(true);
+    options.create_missing_column_families(true);
+    options.set_merge_operator_associative("concat", test_provided_merge);
+    let db = DB::open_cf_descriptors(
+        &options,
+        &path,
+        [ColumnFamilyDescriptor::new("cf1", options.clone())],
+    )
+    .unwrap();
+    let cf = db.cf_handle("cf1").unwrap();
+    db.put_cf(cf, b"key", b"a").unwrap();
+    db.merge_cf(cf, b"key", b"bc").unwrap();
+    assert_eq!(db.get_cf(cf, b"key").unwrap().unwrap().as_ref(), b"abc");
+    let values: Vec<_> = db
+        .iterator_cf(cf, rocksdb::IteratorMode::Start)
+        .unwrap()
+        .collect();
+    assert_eq!(values.len(), 1);
+    assert_eq!(&*values[0].1, b"abc");
+    db.delete_cf(cf, b"key").unwrap();
+    assert!(db.get_cf(cf, b"key").unwrap().is_none());
 }
 
 #[allow(clippy::unnecessary_wraps)]

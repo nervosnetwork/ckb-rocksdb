@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{ffi::CStr, path};
+use std::{ffi::CStr, path, ptr::NonNull};
 
 use crate::{
-    ColumnFamilyDescriptor, Error, Options,
-    db_options::{Cache, OptionsMustOutliveDB},
+    ColumnFamilyDescriptor, Env, Error, Options,
+    db_options::{Cache, CacheWrapper, OptionsMustOutliveDB},
     ffi, ffi_util,
 };
 
@@ -24,6 +24,15 @@ use crate::{
 pub struct FullOptions {
     pub db_opts: Options,
     pub cf_descriptors: Vec<ColumnFamilyDescriptor>,
+}
+
+struct ColumnFamilyDescriptors(*mut ffi::rocksdb_column_family_descriptors_t);
+
+impl Drop for ColumnFamilyDescriptors {
+    fn drop(&mut self) {
+        // The loader transfers the collection, including every name, to us.
+        unsafe { ffi::rocksdb_column_family_descriptors_destroy(self.0) };
+    }
 }
 
 impl FullOptions {
@@ -37,7 +46,7 @@ impl FullOptions {
     {
         Self::load_from_file_with_cache(
             file,
-            cache_size.map(Cache::new_lru_cache),
+            cache_size.map(Cache::try_new_lru_cache).transpose()?,
             ignore_unknown_options,
         )
     }
@@ -55,27 +64,57 @@ impl FullOptions {
             "Failed to convert path to CString when load config file.",
         )?;
 
+        let env = Env::default_env()?;
         unsafe {
-            let env = ffi::rocksdb_create_default_env();
+            // The C loader expects a cache wrapper even when its shared cache
+            // is null. Give that temporary wrapper an owner on both exit paths.
+            let null_cache;
+            let cache_ptr = match &cache {
+                Some(cache) => cache.0.inner.as_ptr(),
+                None => {
+                    null_cache = CacheWrapper {
+                        inner: NonNull::new(ffi::rocksdb_null_cache()).ok_or_else(|| {
+                            Error::new("Could not create RocksDB null cache.".to_owned())
+                        })?,
+                    };
+                    null_cache.inner.as_ptr()
+                }
+            };
             let result = ffi_try!(ffi::rocksdb_options_load_from_file(
                 cpath.as_ptr(),
-                env,
+                env.handle(),
                 ignore_unknown_options,
-                cache
-                    .as_ref()
-                    .map(|c| c.0.inner.as_ptr())
-                    .unwrap_or_else(|| ffi::rocksdb_null_cache()),
+                cache_ptr,
             ));
-            ffi::rocksdb_env_destroy(env);
-            let db_opts = result.db_opts;
-            let cf_descs = result.cf_descs;
+            let descriptors = ColumnFamilyDescriptors(result.cf_descs);
+            let db_opts = Options {
+                inner: NonNull::new(result.db_opts)
+                    .ok_or_else(|| Error::new("Could not load RocksDB options.".to_owned()))?
+                    .as_ptr(),
+                outlive: OptionsMustOutliveDB {
+                    row_cache: cache.clone(),
+                    ..Default::default()
+                },
+            };
+            let cf_descs = NonNull::new(descriptors.0)
+                .ok_or_else(|| Error::new("Could not load column family descriptors.".to_owned()))?
+                .as_ptr();
             let cf_descs_size = ffi::rocksdb_column_family_descriptors_count(cf_descs);
             let mut cf_descriptors = Vec::new();
             for index in 0..cf_descs_size {
                 let name_raw = ffi::rocksdb_column_family_descriptors_name(cf_descs, index);
+                if name_raw.is_null() {
+                    return Err(Error::new(
+                        "Could not load a column family name.".to_owned(),
+                    ));
+                }
                 let name_cstr = CStr::from_ptr(name_raw as *const _);
                 let name = String::from_utf8_lossy(name_cstr.to_bytes());
-                let cf_opts_inner = ffi::rocksdb_column_family_descriptors_options(cf_descs, index);
+                let cf_opts_inner = NonNull::new(ffi::rocksdb_column_family_descriptors_options(
+                    cf_descs, index,
+                ))
+                .ok_or_else(|| Error::new("Could not copy column family options.".to_owned()))?
+                .as_ptr();
                 let outlive = OptionsMustOutliveDB {
                     row_cache: cache.clone(),
                     ..Default::default()
@@ -86,78 +125,53 @@ impl FullOptions {
                 };
                 cf_descriptors.push(ColumnFamilyDescriptor::new(name, cf_opts));
             }
-            ffi::rocksdb_column_family_descriptors_destroy(cf_descs);
-
-            let outlive = OptionsMustOutliveDB {
-                row_cache: cache,
-                ..Default::default()
-            };
-
             Ok(Self {
-                db_opts: Options {
-                    inner: db_opts,
-                    outlive,
-                },
+                db_opts,
                 cf_descriptors,
             })
         }
     }
 
-    /* This method is used to check those column families which are ignored in the options file,
-     * and create column family descriptors with default options for them.
-     *
-     * For example:
-     * If there is only 'cf_A' in the options file, but in fact we need both of 'cf_A' and 'cf_B',
-     * after we use `Self::load_from_file(..)`, we will get only two `ColumnFamilyDescriptors`:
-     * 'default' and 'cf_A'.
-     * Then we can call `full_options.complete_column_families(&["cf_A", "cf_B"])` to add the
-     * `ColumnFamilyDescriptor` for "cf_B" with the "default" column family options.
-     *
-     * Notice:
-     * The "default" column family options is not default column family options.
-     * They are same only if no "default" column family options was provided in the options file.
-     *
-     * If `ignore_unknown_column_families` is `false` and there has column families which were
-     * provided in the options file but not in the `cf_names`, this method will return an error.
-     */
+    /// Add missing families using the options of the file's `default` family,
+    /// creating that family with [`Options::default`] if it is absent.
+    ///
+    /// `cf_names` must not include `default`. Existing families omitted from
+    /// `cf_names` cause an error unless `ignore_unknown_column_families` is true;
+    /// they are retained in either case. An error does not roll back additions.
     pub fn complete_column_families(
         &mut self,
         cf_names: &[&str],
         ignore_unknown_column_families: bool,
     ) -> Result<(), Error> {
-        let cf_name_default = "default";
-        let mut options_default = None;
+        let mut default_options = None;
         for cfd in &self.cf_descriptors {
-            if cfd.name == cf_name_default {
-                options_default = Some(cfd.options.clone());
-                continue;
-            }
-            if cf_names.iter().any(|cf_name| &cfd.name == cf_name) {
-                continue;
-            }
-            if !ignore_unknown_column_families {
+            if cfd.name == "default" {
+                default_options = Some(cfd.options.clone());
+            } else if !ignore_unknown_column_families && !cf_names.contains(&cfd.name.as_str()) {
                 return Err(Error::new(format!(
                     "an unknown column family named \"{}\"",
                     cfd.name
                 )));
             }
         }
-        if options_default.is_none() {
-            let cf = ColumnFamilyDescriptor::new(cf_name_default, Options::default());
-            options_default = Some(cf.options.clone());
+        let default_options = default_options.unwrap_or_else(|| {
+            let cf = ColumnFamilyDescriptor::new("default", Options::default());
+            let options = cf.options.clone();
             self.cf_descriptors.insert(0, cf);
-        }
-        let options_default = options_default.unwrap();
-        for cf_name in cf_names {
-            if cf_name == &cf_name_default {
+            options
+        });
+        for &cf_name in cf_names {
+            if cf_name == "default" {
                 return Err(Error::new(format!(
                     "don't name a user-defined column family as \"{}\"",
                     cf_name
                 )));
             }
-            if self.cf_descriptors.iter().all(|cfd| &cfd.name != cf_name) {
-                let cf = ColumnFamilyDescriptor::new(cf_name.to_owned(), options_default.clone());
-                self.cf_descriptors.push(cf);
+            if !self.cf_descriptors.iter().any(|cfd| cfd.name == cf_name) {
+                self.cf_descriptors.push(ColumnFamilyDescriptor::new(
+                    cf_name.to_owned(),
+                    default_options.clone(),
+                ));
             }
         }
         Ok(())

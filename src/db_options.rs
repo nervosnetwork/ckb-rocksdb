@@ -49,6 +49,12 @@ impl Drop for CacheWrapper {
 pub struct Cache(pub(crate) Arc<CacheWrapper>);
 
 impl Cache {
+    pub(crate) fn try_new_lru_cache(capacity: size_t) -> Result<Self, Error> {
+        let inner = NonNull::new(unsafe { ffi::rocksdb_cache_create_lru_checked(capacity) })
+            .ok_or_else(|| Error::new("Could not create RocksDB LRU cache.".to_owned()))?;
+        Ok(Cache(Arc::new(CacheWrapper { inner })))
+    }
+
     /// Creates an LRU cache with capacity in bytes.
     pub fn new_lru_cache(capacity: size_t) -> Cache {
         let inner = NonNull::new(unsafe { ffi::rocksdb_cache_create_lru(capacity) }).unwrap();
@@ -128,11 +134,15 @@ impl Drop for EnvWrapper {
 }
 
 impl Env {
+    pub(crate) fn handle(&self) -> *mut ffi::rocksdb_env_t {
+        self.0.inner
+    }
+
     /// Returns default env
     pub fn default_env() -> Result<Self, Error> {
-        let env = unsafe { ffi::rocksdb_create_default_env() };
+        let env = unsafe { ffi::rocksdb_create_default_env_checked() };
         if env.is_null() {
-            Err(Error::new("Could not create mem env".to_owned()))
+            Err(Error::new("Could not create default env".to_owned()))
         } else {
             Ok(Self(Arc::new(EnvWrapper { inner: env })))
         }
@@ -221,15 +231,52 @@ impl Env {
 
 #[derive(Clone, Default)]
 pub struct OptionsMustOutliveDB {
+    pub(crate) comparator: Option<Arc<NativeCallback>>,
+    pub(crate) compaction_filter: Option<Arc<NativeCallback>>,
     pub(crate) env: Option<Env>,
     pub(crate) row_cache: Option<Cache>,
     pub(crate) block_based: Option<BlockBasedOptionsMustOutliveDB>,
 }
 
+pub(crate) trait RetainOptions {
+    fn retain_options(&mut self, options: &Options);
+}
+
+// Native options borrow direct callbacks; the options, every clone and every
+// opened DB/CF share their owners until native teardown has completed.
+pub(crate) enum NativeCallback {
+    Comparator(*mut ffi::rocksdb_comparator_t),
+    CompactionFilter(*mut ffi::rocksdb_compactionfilter_t),
+}
+
+// Comparators contain immutable Send + Sync closures; filters serialize their
+// Send state and keep their names immutable. Native destruction runs only once.
+unsafe impl Send for NativeCallback {}
+unsafe impl Sync for NativeCallback {}
+
+impl Drop for NativeCallback {
+    fn drop(&mut self) {
+        unsafe {
+            match *self {
+                Self::Comparator(ptr) => ffi::rocksdb_comparator_destroy(ptr),
+                Self::CompactionFilter(ptr) => ffi::rocksdb_compactionfilter_destroy(ptr),
+            }
+        }
+    }
+}
+
 impl OptionsMustOutliveDB {
+    pub(crate) fn retain_in(&self, retained: &mut Vec<Self>) {
+        if !retained.iter().any(|old| old.same_resources(self)) {
+            retained.push(self.clone());
+        }
+    }
+
     pub(crate) fn same_resources(&self, other: &Self) -> bool {
         let resources = |options: &Self| {
             (
+                options.comparator.as_ref().map(Arc::as_ptr),
+                options.compaction_filter.as_ref().map(Arc::as_ptr),
                 options.env.as_ref().map(|env| Arc::as_ptr(&env.0)),
                 options
                     .row_cache
@@ -359,6 +406,8 @@ pub struct ReadOptions {
     option_set_prefix_same_as_start: Option<bool>,
     option_set_total_order_seek: Option<bool>,
     option_set_readahead_size: Option<usize>,
+    option_set_async_io: Option<bool>,
+    option_set_snapshot: Option<*const ffi::rocksdb_snapshot_t>,
     inner: *mut ffi::rocksdb_readoptions_t,
 }
 
@@ -428,7 +477,7 @@ impl Drop for Options {
 
 impl Clone for Options {
     fn clone(&self) -> Self {
-        let inner = unsafe { ffi::rocksdb_options_create_copy(self.inner) };
+        let inner = unsafe { ffi::rocksdb_options_clone(self.inner) };
         assert!(!inner.is_null(), "Could not copy RocksDB options");
 
         Self {
@@ -1310,16 +1359,17 @@ impl Options {
     /// If you take a snapshot of the database, only values written since the last
     /// snapshot will be passed through the compaction filter.
     ///
-    /// If multi-threaded compaction is used, `filter_fn` may be called multiple times
-    /// simultaneously.
+    /// Calls to this shared mutable filter are serialized across compactions.
     pub fn set_compaction_filter<F>(&mut self, name: &str, filter_fn: F)
     where
         F: CompactionFilterFn + Send + 'static,
     {
-        let cb = Box::new(CompactionFilterCallback {
-            name: CString::new(name.as_bytes()).unwrap(),
-            filter_fn,
-        });
+        let cb = Box::new(compaction_filter::FilterCallback::new(
+            CompactionFilterCallback {
+                name: CString::new(name.as_bytes()).unwrap(),
+                filter_fn,
+            },
+        ));
 
         unsafe {
             let cf = ffi::rocksdb_compactionfilter_create(
@@ -1329,6 +1379,7 @@ impl Options {
                 Some(compaction_filter::name_callback::<CompactionFilterCallback<F>>),
             );
             ffi::rocksdb_options_set_compaction_filter(self.inner, cf);
+            self.outlive.compaction_filter = Some(Arc::new(NativeCallback::CompactionFilter(cf)));
         }
     }
 
@@ -1344,7 +1395,7 @@ impl Options {
     where
         F: CompactionFilterFactory + 'static,
     {
-        let factory = Box::new(factory);
+        let factory = Box::new(compaction_filter_factory::FactoryCallback::new(factory));
 
         unsafe {
             let cff = ffi::rocksdb_compactionfilterfactory_create(
@@ -1378,10 +1429,12 @@ impl Options {
                 Some(comparator::name_callback),
             );
             ffi::rocksdb_options_set_comparator(self.inner, cmp);
+            self.outlive.comparator = Some(Arc::new(NativeCallback::Comparator(cmp)));
         }
     }
 
     pub fn set_prefix_extractor(&mut self, prefix_extractor: SliceTransform) {
+        let prefix_extractor = std::mem::ManuallyDrop::new(prefix_extractor);
         unsafe {
             ffi::rocksdb_options_set_prefix_extractor(self.inner, prefix_extractor.inner);
         }
@@ -3117,10 +3170,6 @@ impl Clone for WriteOptions {
 }
 
 impl ReadOptions {
-    // TODO add snapshot setting here
-    // TODO add snapshot wrapper structs with proper destructors;
-    // that struct needs an "iterator" impl too.
-
     /// Specify whether the "data block"/"index block"/"filter block"
     /// read for this iteration should be cached in memory?
     /// Callers may wish to set this field to false for bulk scans.
@@ -3134,22 +3183,30 @@ impl ReadOptions {
     }
 
     /// Sets the snapshot which should be used for the read.
-    /// The snapshot must belong to the DB that is being read and must
-    /// not have been released.
-    pub fn set_snapshot<T>(&mut self, snapshot: &T)
+    ///
+    /// # Safety
+    /// The snapshot must belong to the DB being read and outlive every use of
+    /// these options, their clones, and the iterators created from them.
+    pub unsafe fn set_snapshot<T>(&mut self, snapshot: &T)
     where
         T: ConstHandle<ffi::rocksdb_snapshot_t>,
     {
+        self.set_snapshot_handle(snapshot.const_handle());
+    }
+
+    fn set_snapshot_handle(&mut self, snapshot: *const ffi::rocksdb_snapshot_t) {
         unsafe {
-            ffi::rocksdb_readoptions_set_snapshot(self.inner, snapshot.const_handle());
+            ffi::rocksdb_readoptions_set_snapshot(self.inner, snapshot);
         }
+        self.option_set_snapshot = Some(snapshot);
     }
 
     /// Sets the upper bound for an iterator.
     /// The upper bound itself is not included on the iteration result.
     pub fn set_iterate_upper_bound<K: AsRef<[u8]>>(&mut self, key: K) {
-        self.option_set_iterate_upper_bound = Some(key.as_ref().to_vec());
-        let key = self.option_set_iterate_upper_bound.as_ref().unwrap();
+        let key = self
+            .option_set_iterate_upper_bound
+            .insert(key.as_ref().to_vec());
         unsafe {
             ffi::rocksdb_readoptions_set_iterate_upper_bound(
                 self.inner,
@@ -3161,10 +3218,11 @@ impl ReadOptions {
 
     /// Sets the lower bound for an iterator.
     pub fn set_iterate_lower_bound<K: AsRef<[u8]>>(&mut self, key: K) {
-        self.option_set_iterate_lower_bound = Some(key.as_ref().to_vec());
-        let key = self.option_set_iterate_lower_bound.as_ref().unwrap();
+        let key = self
+            .option_set_iterate_lower_bound
+            .insert(key.as_ref().to_vec());
         unsafe {
-            ffi::rocksdb_readoptions_set_iterate_upper_bound(
+            ffi::rocksdb_readoptions_set_iterate_lower_bound(
                 self.inner,
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
@@ -3224,6 +3282,12 @@ impl ReadOptions {
         unsafe {
             ffi::rocksdb_readoptions_set_async_io(self.inner, c_uchar::from(v));
         }
+        self.option_set_async_io = Some(v);
+    }
+
+    pub(crate) fn has_iterate_bounds(&self) -> bool {
+        self.option_set_iterate_lower_bound.is_some()
+            || self.option_set_iterate_upper_bound.is_some()
     }
 
     pub fn input_or_default(
@@ -3264,6 +3328,8 @@ impl Default for ReadOptions {
                 option_set_prefix_same_as_start: None,
                 option_set_total_order_seek: None,
                 option_set_readahead_size: None,
+                option_set_async_io: None,
+                option_set_snapshot: None,
                 inner: ffi::rocksdb_readoptions_create(),
             }
         }
@@ -3291,6 +3357,12 @@ impl Clone for ReadOptions {
         if let Some(set_readahead_size) = self.option_set_readahead_size {
             ops.set_readahead_size(set_readahead_size)
         };
+        if let Some(async_io) = self.option_set_async_io {
+            ops.set_async_io(async_io);
+        }
+        if let Some(snapshot) = self.option_set_snapshot {
+            ops.set_snapshot_handle(snapshot);
+        }
         ops
     }
 }
@@ -3742,31 +3814,31 @@ impl Drop for DBPath {
     }
 }
 
-impl ConstHandle<ffi::rocksdb_options_t> for Options {
+unsafe impl ConstHandle<ffi::rocksdb_options_t> for Options {
     fn const_handle(&self) -> *const ffi::rocksdb_options_t {
         self.inner
     }
 }
 
-impl Handle<ffi::rocksdb_options_t> for Options {
+unsafe impl Handle<ffi::rocksdb_options_t> for Options {
     fn handle(&self) -> *mut ffi::rocksdb_options_t {
         self.inner
     }
 }
 
-impl Handle<ffi::rocksdb_readoptions_t> for ReadOptions {
+unsafe impl Handle<ffi::rocksdb_readoptions_t> for ReadOptions {
     fn handle(&self) -> *mut ffi::rocksdb_readoptions_t {
         self.inner
     }
 }
 
-impl Handle<ffi::rocksdb_writeoptions_t> for WriteOptions {
+unsafe impl Handle<ffi::rocksdb_writeoptions_t> for WriteOptions {
     fn handle(&self) -> *mut ffi::rocksdb_writeoptions_t {
         self.inner
     }
 }
 
-impl Handle<ffi::rocksdb_ingestexternalfileoptions_t> for IngestExternalFileOptions {
+unsafe impl Handle<ffi::rocksdb_ingestexternalfileoptions_t> for IngestExternalFileOptions {
     fn handle(&self) -> *mut ffi::rocksdb_ingestexternalfileoptions_t {
         self.inner
     }

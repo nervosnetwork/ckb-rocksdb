@@ -21,6 +21,70 @@ use crate::{Error, ReadOptions, handle::Handle};
 
 pub type CFAndKey<'a> = (&'a ColumnFamily, Box<[u8]>);
 
+/// Owns the key bytes backing the parallel arrays passed to the C API.
+pub(crate) struct MultiGetKeys {
+    _keys: Vec<Box<[u8]>>,
+    pub(crate) pointers: Vec<*const c_char>,
+    pub(crate) sizes: Vec<usize>,
+}
+
+impl MultiGetKeys {
+    pub(crate) fn new<K: AsRef<[u8]>>(keys: impl IntoIterator<Item = K>) -> Self {
+        let (keys, sizes): (Vec<Box<[u8]>>, Vec<_>) = keys
+            .into_iter()
+            .map(|key| {
+                let bytes = Box::<[u8]>::from(key.as_ref());
+                let len = bytes.len();
+                (bytes, len)
+            })
+            .unzip();
+        let pointers = keys.iter().map(|key| key.as_ptr().cast()).collect();
+        Self {
+            _keys: keys,
+            pointers,
+            sizes,
+        }
+    }
+
+    pub(crate) fn with_column_families<'a, K: AsRef<[u8]>>(
+        keys: impl IntoIterator<Item = (&'a ColumnFamily, K)>,
+    ) -> (Vec<*const ffi::rocksdb_column_family_handle_t>, Self) {
+        let keys = keys.into_iter();
+        let mut columns = Vec::with_capacity(keys.size_hint().0);
+        let keys = Self::new(keys.map(|(column, key)| {
+            columns.push(column.inner as *const _);
+            key
+        }));
+        (columns, keys)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.pointers.len()
+    }
+}
+
+/// Each input key has one value, length and error slot, in input order.
+pub(crate) struct MultiGetResults {
+    pub(crate) values: Vec<*mut c_char>,
+    pub(crate) sizes: Vec<usize>,
+    pub(crate) errors: Vec<*mut c_char>,
+}
+
+impl MultiGetResults {
+    pub(crate) fn new(len: usize) -> Self {
+        Self {
+            values: vec![ptr::null_mut(); len],
+            sizes: vec![0; len],
+            errors: vec![ptr::null_mut(); len],
+        }
+    }
+
+    pub(crate) fn into_values(self) -> Vec<Result<Option<DBVector>, Error>> {
+        // These equally sized output slots were filled by the native MultiGet.
+        unsafe { convert_values(self.values, self.sizes, self.errors) }
+    }
+}
+
 pub trait MultiGet<R> {
     fn multi_get_full<K, I>(
         &self,
@@ -97,36 +161,25 @@ where
         let ro_handle = match ReadOptions::input_or_default(readopts, &mut default_readopts) {
             Ok(ro) => ro,
             Err(e) => {
-                let key_count = keys.into_iter().count();
-
-                return vec![e; key_count]
-                    .iter()
-                    .map(|e| Err(e.to_owned()))
-                    .collect();
+                return keys.into_iter().map(|_| Err(e.clone())).collect();
             }
         };
 
-        let (keys, keys_sizes): (Vec<Box<[u8]>>, Vec<_>) = keys
-            .into_iter()
-            .map(|k| (Box::from(k.as_ref()), k.as_ref().len()))
-            .unzip();
-        let ptr_keys: Vec<_> = keys.iter().map(|k| k.as_ptr() as *const c_char).collect();
-        let mut values = vec![ptr::null_mut(); keys.len()];
-        let mut values_sizes = vec![0_usize; keys.len()];
-        let mut errors = vec![ptr::null_mut(); keys.len()];
+        let keys = MultiGetKeys::new(keys);
+        let mut results = MultiGetResults::new(keys.len());
         unsafe {
             ffi::rocksdb_multi_get(
                 self.handle(),
                 ro_handle,
-                ptr_keys.len(),
-                ptr_keys.as_ptr(),
-                keys_sizes.as_ptr(),
-                values.as_mut_ptr(),
-                values_sizes.as_mut_ptr(),
-                errors.as_mut_ptr(),
+                keys.len(),
+                keys.pointers.as_ptr(),
+                keys.sizes.as_ptr(),
+                results.values.as_mut_ptr(),
+                results.sizes.as_mut_ptr(),
+                results.errors.as_mut_ptr(),
             );
         }
-        convert_values(values, values_sizes, errors)
+        results.into_values()
     }
 }
 
@@ -148,45 +201,27 @@ where
         let ro_handle = match ReadOptions::input_or_default(readopts, &mut default_readopts) {
             Ok(ro) => ro,
             Err(e) => {
-                let key_count = keys.into_iter().count();
-                return vec![e; key_count]
-                    .iter()
-                    .map(|e| Err(e.to_owned()))
-                    .collect();
+                return keys.into_iter().map(|_| Err(e.clone())).collect();
             }
         };
 
-        let (cfs_and_keys, keys_sizes): (Vec<CFAndKey>, Vec<_>) = keys
-            .into_iter()
-            .map(|(cf, key)| ((cf, Box::from(key.as_ref())), key.as_ref().len()))
-            .unzip();
-        let ptr_keys: Vec<_> = cfs_and_keys
-            .iter()
-            .map(|(_, k)| k.as_ptr() as *const c_char)
-            .collect();
-        let ptr_cfs: Vec<_> = cfs_and_keys
-            .iter()
-            .map(|(c, _)| c.inner as *const _)
-            .collect();
-
-        let mut values = vec![ptr::null_mut(); ptr_keys.len()];
-        let mut values_sizes = vec![0_usize; ptr_keys.len()];
-        let mut errors = vec![ptr::null_mut(); ptr_keys.len()];
+        let (columns, keys) = MultiGetKeys::with_column_families(keys);
+        let mut results = MultiGetResults::new(keys.len());
         unsafe {
             ffi::rocksdb_multi_get_cf(
                 self.handle(),
                 ro_handle,
-                ptr_cfs.as_ptr(),
-                ptr_keys.len(),
-                ptr_keys.as_ptr(),
-                keys_sizes.as_ptr(),
-                values.as_mut_ptr(),
-                values_sizes.as_mut_ptr(),
-                errors.as_mut_ptr(),
+                columns.as_ptr(),
+                keys.len(),
+                keys.pointers.as_ptr(),
+                keys.sizes.as_ptr(),
+                results.values.as_mut_ptr(),
+                results.sizes.as_mut_ptr(),
+                results.errors.as_mut_ptr(),
             );
         }
 
-        convert_values(values, values_sizes, errors)
+        results.into_values()
     }
 }
 
@@ -249,12 +284,7 @@ where
         let ro_handle = match ReadOptions::input_or_default(readopts, &mut default_readopts) {
             Ok(ro) => ro,
             Err(e) => {
-                let key_count = keys.into_iter().count();
-
-                return vec![e; key_count]
-                    .iter()
-                    .map(|e| Err(e.to_owned()))
-                    .collect();
+                return keys.into_iter().map(|_| Err(e.clone())).collect();
             }
         };
 
@@ -300,7 +330,13 @@ where
     }
 }
 
-pub fn convert_values(
+/// Takes ownership of native MultiGet outputs.
+///
+/// # Safety
+/// All vectors must have equal lengths. Non-null values and errors must be
+/// distinct, exclusively owned RocksDB allocations; each length must describe
+/// the corresponding value allocation and each error must be NUL-terminated.
+pub unsafe fn convert_values(
     values: Vec<*mut c_char>,
     values_sizes: Vec<usize>,
     errors: Vec<*mut c_char>,
@@ -316,7 +352,7 @@ pub fn convert_values(
                 }
                 unsafe { Ok(Some(DBVector::from_c(v as *mut u8, s))) }
             } else {
-                Err(Error::new(crate::ffi_util::error_message(e)))
+                Err(Error::new(unsafe { crate::ffi_util::error_message(e) }))
             }
         })
         .collect()

@@ -1,5 +1,9 @@
 #include "patches/rocksdb.h"
 
+#include <climits>
+#include <memory>
+#include <new>
+#include <string>
 #include "rocksdb/utilities/options_util.h"
 
 using rocksdb::Cache;
@@ -9,9 +13,9 @@ using rocksdb::Options;
 using rocksdb::Status;
 
 extern "C" {
-    // Copy structs from librocksdb-sys/rocksdb/db/c.cc
+    // Match the opaque C API wrappers in rocksdb/db/c.cc.
     struct rocksdb_cache_t {
-        std::shared_ptr<Cache>  rep;
+        std::shared_ptr<Cache> rep;
     };
     struct rocksdb_env_t {
         Env* rep;
@@ -21,36 +25,47 @@ extern "C" {
         Options rep;
     };
 
-    // New structs
     struct rocksdb_column_family_descriptor_t {
-        char *name;
+        std::string name;
         Options options;
     };
     struct rocksdb_column_family_descriptors_t {
         std::vector<rocksdb_column_family_descriptor_t> rep;
     };
 
+    rocksdb_env_t* rocksdb_create_default_env_checked() {
+        try {
+            return new rocksdb_env_t{Env::Default(), true};
+        } catch (...) {
+            return nullptr;
+        }
+    }
+
+    rocksdb_cache_t* rocksdb_cache_create_lru_checked(size_t capacity) {
+        try {
+            return new rocksdb_cache_t{rocksdb::NewLRUCache(capacity)};
+        } catch (...) {
+            return nullptr;
+        }
+    }
+
     rocksdb_cache_t* rocksdb_null_cache() {
-        rocksdb_cache_t* c = new rocksdb_cache_t;
-        c->rep = nullptr;
-        return c;
+        return new (std::nothrow) rocksdb_cache_t;
     }
 
     rocksdb_options_t* rocksdb_options_clone(rocksdb_options_t* options) {
-        rocksdb_options_t* o = new rocksdb_options_t;
-        o->rep = Options(options->rep);
-        return o;
+        try {
+            return new rocksdb_options_t{options->rep};
+        } catch (...) {
+            return nullptr;
+        }
     }
 
     rocksdb_column_family_descriptors_t* rocksdb_column_family_descriptors_create() {
-        return new rocksdb_column_family_descriptors_t;
+        return new (std::nothrow) rocksdb_column_family_descriptors_t;
     }
 
     void rocksdb_column_family_descriptors_destroy(rocksdb_column_family_descriptors_t* cf_descs) {
-        int size = static_cast<int>(cf_descs->rep.size());
-        for (int i = 0; i < size; i++) {
-            free(cf_descs->rep[i].name);
-        }
         delete cf_descs;
     }
 
@@ -59,13 +74,23 @@ extern "C" {
     }
 
     char* rocksdb_column_family_descriptors_name(const rocksdb_column_family_descriptors_t* cf_descs, int index) {
-        return cf_descs->rep[index].name;
+        // Borrowed until the descriptor collection is destroyed, as before.
+        return const_cast<char*>(cf_descs->rep[index].name.c_str());
     }
 
     rocksdb_options_t* rocksdb_column_family_descriptors_options(const rocksdb_column_family_descriptors_t* cf_descs, int index) {
-        rocksdb_options_t* options = new rocksdb_options_t;
-        options->rep = cf_descs->rep[index].options;
-        return options;
+        try {
+            return new rocksdb_options_t{cf_descs->rep[index].options};
+        } catch (...) {
+            return nullptr;
+        }
+    }
+
+    static void SaveLoadError(char** errptr, const char* message) {
+        // The C API permits replacing a previously allocated error. Allocation
+        // failure may leave this null; the null result payload still means failure.
+        free(*errptr);
+        *errptr = strdup(message);
     }
 
     rocksdb_fulloptions_t rocksdb_options_load_from_file(
@@ -74,44 +99,33 @@ extern "C" {
         bool ignore_unknown_options,
         rocksdb_cache_t* cache,
         char** errptr) {
-
-        rocksdb_fulloptions_t full_opts;
-        full_opts.db_opts = nullptr;
-        full_opts.cf_descs = nullptr;
-
-        rocksdb_options_t* db_opts = new rocksdb_options_t;
-        std::vector<ColumnFamilyDescriptor> cf_descs_tmp;
-
-        rocksdb::ConfigOptions config_opt;
-        config_opt.ignore_unknown_options = ignore_unknown_options;
-        config_opt.input_strings_escaped = true;
-        config_opt.env = env->rep;
-
-        Status status = rocksdb::LoadOptionsFromFile(
-            config_opt,
-            std::string(config_file),
-            &db_opts->rep,
-            &cf_descs_tmp,
-            &cache->rep);
-        if (status.ok()) {
-            rocksdb_column_family_descriptors_t* cf_descs = new rocksdb_column_family_descriptors_t;
-            full_opts.db_opts = db_opts;
-            int cf_descs_tmp_size = static_cast<int>(cf_descs_tmp.size());
-            for (int i = 0; i < cf_descs_tmp_size; i++) {
-                rocksdb_column_family_descriptor_t cf_desc;
-                cf_desc.name = strdup(cf_descs_tmp[i].name.c_str());
-                cf_desc.options = Options(db_opts->rep, cf_descs_tmp[i].options);
-                cf_descs->rep.push_back(cf_desc);
+        try {
+            auto db_opts = std::make_unique<rocksdb_options_t>();
+            std::vector<ColumnFamilyDescriptor> loaded;
+            rocksdb::ConfigOptions config;
+            config.ignore_unknown_options = ignore_unknown_options;
+            config.input_strings_escaped = true;
+            config.env = env->rep;
+            Status status = rocksdb::LoadOptionsFromFile(
+                config, std::string(config_file), &db_opts->rep, &loaded, &cache->rep);
+            if (!status.ok()) {
+                SaveLoadError(errptr, status.ToString().c_str());
+                return {};
             }
-            full_opts.cf_descs = cf_descs;
-            return full_opts;
-        } else {
-            delete db_opts;
+            if (loaded.size() > INT_MAX) {
+                SaveLoadError(errptr, "Too many RocksDB column families.");
+                return {};
+            }
+            auto cf_descs = std::make_unique<rocksdb_column_family_descriptors_t>();
+            cf_descs->rep.reserve(loaded.size());
+            for (const auto& cf : loaded) {
+                cf_descs->rep.push_back({cf.name, Options(db_opts->rep, cf.options)});
+            }
+            return {db_opts.release(), cf_descs.release()};
+        } catch (...) {
+            // Error reporting must not construct another throwing C++ object.
+            SaveLoadError(errptr, "Could not allocate or construct RocksDB options.");
+            return {};
         }
-        if (*errptr != nullptr) {
-            free(*errptr);
-        }
-        *errptr = strdup(status.ToString().c_str());
-        return full_opts;
     }
 }

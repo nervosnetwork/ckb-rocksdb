@@ -61,7 +61,7 @@ impl ColumnFamily {
     }
 }
 
-impl Handle<ffi::rocksdb_column_family_handle_t> for ColumnFamily {
+unsafe impl Handle<ffi::rocksdb_column_family_handle_t> for ColumnFamily {
     fn handle(&self) -> *mut ffi::rocksdb_column_family_handle_t {
         self.inner
     }

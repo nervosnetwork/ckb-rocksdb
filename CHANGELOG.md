@@ -2,6 +2,9 @@
 
 ## 1.0.0 (unreleased)
 
+* Retain optimistic transaction databases with `Arc`, serialize native transaction access, and reject writes/resets that would invalidate live transaction views. See the README for the 1.0 migration contract.
+* Make raw handle and snapshot-option contracts explicitly unsafe; retain direct compaction filters and comparators through database shutdown, serialize mutable filter/factory callbacks, and bind prefix-transform results to each input key's lifetime.
+* Make options loading and its helper allocations exception-safe, reject incomplete native results, and exercise allocation failures and native error ownership in the memory checks.
 * Declare the stable 1.0 Rust API, retain exact native-engine version pinning, and verify both publishable crates as one Cargo workspace.
 * Update direct dependencies, remove unused runtime dependencies and the platform-output INI parser, and narrow source packages while retaining native headers and license notices.
 * Update bundled zlib to 1.3.2; retain current stable Zstandard 1.5.7 and bzip2 1.0.8.
@@ -10,6 +13,7 @@
 
 * Upgrade native RocksDB to 11.8.1, with bundled Snappy 1.2.2 and LZ4 1.10.0; align the generated Snappy version header with its sources. Use upstream platform detection in the Cargo output directory.
 * Add owned column families, iterator error reporting and WAL flushing for online Freezer collection; keep database resources alive through CF retirement, snapshots and pinned reads.
+* Keep WAL reclamation progressing when the last column family needing an old log is dropped; advance recovery metadata through the normal flush path, including an empty default CF.
 * Keep `Options::set_skip_checking_sst_file_sizes_on_db_open` as a deprecated no-op for source compatibility, and adapt the prefix-transform callback to the current C API.
 * Use owned handles to release a partially created CF batch on error, and derive resource cloning instead of maintaining duplicate implementations.
 * The default compression is now LZ4. Existing Snappy/LZ4 SSTs remain readable; SST format versions below 2 require compaction with an older engine before upgrading.

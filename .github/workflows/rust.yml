@@ -79,6 +79,7 @@ jobs:
             features: march-native,jemalloc,io-uring
           - build: macOS
             os: macos-latest
+            # Linux feature flags must also be harmless on other platforms.
             features: portable,jemalloc,io-uring,serde1
           - build: windows-2022
             os: windows-2022
@@ -113,6 +114,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libclang-dev strace jq
       - name: Build test binaries
+        if: matrix.native-features
         shell: bash
         run: cargo test --locked --workspace ${{ matrix.args }} --features '${{ matrix.features }}' --no-run --message-format=json > native-build.json
       - name: Run tests
@@ -134,4 +136,4 @@ jobs:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
       - run: sudo apt-get update && sudo apt-get install -y libclang-dev
       - name: Verify both packaged crates, including Linux features
-        run: cargo publish --locked --workspace --dry-run --features portable,jemalloc,io-uring
+        run: sh ci/publish-dry-run.sh

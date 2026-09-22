@@ -15,10 +15,19 @@
 
 /// Provides access to underlying handles for
 /// database operations
-pub trait Handle<T> {
+///
+/// # Safety
+/// The returned native handle must be valid for the implementor's lifetime and
+/// support the operations and thread sharing exposed by its marker traits.
+pub unsafe trait Handle<T> {
     fn handle(&self) -> *mut T;
 }
 
-pub trait ConstHandle<T> {
+/// Read-only access to a borrowed native handle.
+///
+/// # Safety
+/// The pointer must reference the indicated native type and remain valid while
+/// the implementor is borrowed. Additional native ownership rules still apply.
+pub unsafe trait ConstHandle<T> {
     fn const_handle(&self) -> *const T;
 }

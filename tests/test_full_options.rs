@@ -17,6 +17,26 @@ extern crate ckb_rocksdb as rocksdb;
 use crate::rocksdb::{DB, FullOptions, TemporaryDBPath, prelude::*};
 
 #[test]
+fn failed_options_loads_leave_the_cache_reusable() {
+    let directory = tempfile::tempdir().unwrap();
+    let invalid = directory.path().join("invalid-options");
+    std::fs::write(&invalid, "this is not a RocksDB options file\n").unwrap();
+    let cache = rocksdb::Cache::new_lru_cache(1024 * 1024);
+    for path in [directory.path().join("missing-options"), invalid] {
+        assert!(FullOptions::load_from_file(&path, None, false).is_err());
+        assert!(FullOptions::load_from_file_with_cache(&path, Some(cache.clone()), false).is_err());
+    }
+    let options = FullOptions::load_from_file_with_cache(
+        "tests/resources/OPTIONS-000001",
+        Some(cache.clone()),
+        false,
+    )
+    .unwrap();
+    drop(options);
+    assert_eq!(cache.get_pinned_usage(), 0);
+}
+
+#[test]
 fn test_options_load_from_file() {
     let full_opts = {
         let config_file = "tests/resources/OPTIONS-000001";

@@ -38,7 +38,7 @@ pub struct Snapshot<'a> {
     pub(crate) inner: *const ffi::rocksdb_snapshot_t,
 }
 
-impl ConstHandle<ffi::rocksdb_snapshot_t> for Snapshot<'_> {
+unsafe impl ConstHandle<ffi::rocksdb_snapshot_t> for Snapshot<'_> {
     fn const_handle(&self) -> *const ffi::rocksdb_snapshot_t {
         self.inner
     }
@@ -54,7 +54,8 @@ impl GetCF<ReadOptions> for Snapshot<'_> {
         readopts: Option<&ReadOptions>,
     ) -> Result<Option<DBVector>, Error> {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
 
         self.db.get_cf_full(cf, key, Some(&ro))
     }
@@ -71,7 +72,8 @@ impl MultiGet<ReadOptions> for Snapshot<'_> {
         I: IntoIterator<Item = K>,
     {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
 
         self.db.multi_get_full(keys, Some(&ro))
     }
@@ -88,7 +90,8 @@ impl MultiGetCF<ReadOptions> for Snapshot<'_> {
         I: IntoIterator<Item = (&'m ColumnFamily, K)>,
     {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
 
         self.db.multi_get_cf_full(keys, Some(&ro))
     }
@@ -105,7 +108,8 @@ impl Drop for Snapshot<'_> {
 impl Iterate for Snapshot<'_> {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
         let mut ro = readopts.to_owned();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
         self.db.get_raw_iter(&ro)
     }
 }
@@ -113,11 +117,12 @@ impl Iterate for Snapshot<'_> {
 impl IterateCF for Snapshot<'_> {
     fn get_raw_iter_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
         let mut ro = readopts.to_owned();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
         self.db.get_raw_iter_cf(cf_handle, &ro)
     }
 }

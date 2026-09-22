@@ -258,7 +258,7 @@ impl Drop for WriteBatch {
     }
 }
 
-impl Handle<ffi::rocksdb_writebatch_t> for WriteBatch {
+unsafe impl Handle<ffi::rocksdb_writebatch_t> for WriteBatch {
     fn handle(&self) -> *mut ffi::rocksdb_writebatch_t {
         self.inner
     }

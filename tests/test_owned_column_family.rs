@@ -30,7 +30,8 @@ fn owned_columns_keep_reads_and_database_alive_after_drop() {
         .unwrap();
     let snapshot = db.snapshot();
     let mut snapshot_options = ReadOptions::default();
-    snapshot_options.set_snapshot(&snapshot);
+    // These options are used only with their live snapshot and its DB.
+    unsafe { snapshot_options.set_snapshot(&snapshot) };
     let mut iterator = db
         .iterator_cf_opt(&old, IteratorMode::Start, &snapshot_options)
         .unwrap();

@@ -68,6 +68,35 @@ memory-tracking dependencies to avoid multiple native allocator implementations.
 
 ## Versioning and release verification
 
+### Migrating transaction and callback code to 1.0
+
+Create optimistic transactions from an `Arc<OptimisticTransactionDB>`. Each
+transaction retains the database, so it may outlive the caller's database handle.
+Native transaction calls are serialized. Drop transaction iterators before
+writing, and drop both iterators and transaction snapshots before commit,
+rollback, or rollback to a savepoint. These operations return an error while a
+view they would invalidate is alive; exhausting an iterator does not drop it.
+Pinned values retain their bytes across later writes and commits.
+
+CF iterators borrow the CF handle as well as the database or transaction. For
+independent read ownership, `OwnedColumnFamily::iterator_opt` retains its CF and
+database without borrowing the caller's `Arc`.
+
+Use the snapshot's read and iterator methods for safe snapshot access.
+`ReadOptions::set_snapshot` is now unsafe: the snapshot must belong to the same
+database and outlive every use of the options, its clones and derived iterators.
+Implementing `Handle`/`ConstHandle`, constructing a database with `OpenRaw::build`,
+and mutating its raw CF map also require explicit unsafe contracts. Raw pointer
+fields in transaction options and prefix transforms are private.
+
+Compaction filters and factories must implement `Send`; the binding serializes
+their mutable callbacks. Direct filters and comparators stay alive through
+database shutdown, including those installed on CFs created after open.
+Prefix transforms must accept keys of any lifetime and cannot retain a borrowed
+key beyond the callback.
+
+### Release checks
+
 `ckb-rocksdb 1.x` preserves the public Rust API under semantic versioning.
 The native crate has its own version, matching the bundled RocksDB engine:
 `ckb-librocksdb-sys 11.8.1`. The wrapper pins that native dependency exactly.
@@ -81,12 +110,15 @@ both packages from their packaged sources, including all bundled codecs:
 ```sh
 cargo test --locked --workspace --features portable
 make clippy
-cargo publish --locked --workspace --dry-run --features portable --target-dir "$(mktemp -d)"
+sh ci/publish-dry-run.sh
 ```
 
-`--dry-run` validates packaging and builds without uploading. A fresh target
-directory also gives repeated dry runs a fresh temporary registry for unpublished
-versions, avoiding cached sources from a previous run. Publish the native
+The script verifies all default codecs, `portable`, and the Linux
+`jemalloc`/`io-uring` features using a fresh Cargo cache and target directory,
+then removes both on exit. It requires network access to download dependencies.
+To check uncommitted changes, pass `--allow-dirty`.
+
+The dry run validates both packaged crates without uploading. Publish the native
 crate before the wrapper, or use Cargo's workspace publishing to order them.
 The release archives include their source, headers, and license notices;
 installation from crates.io does not require Git submodules.

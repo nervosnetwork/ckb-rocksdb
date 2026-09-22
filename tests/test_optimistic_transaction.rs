@@ -11,7 +11,7 @@ use std::thread;
 fn test_optimistic_transactiondb() {
     let n = TemporaryDBPath::new();
     {
-        let db = OptimisticTransactionDB::open_default(&n).unwrap();
+        let db = std::sync::Arc::new(OptimisticTransactionDB::open_default(&n).unwrap());
         db.put(b"k1", b"v1").unwrap();
         assert_eq!(db.get(b"k1").unwrap().unwrap().as_ref(), b"v1");
         assert_eq!(db.get_pinned(b"k1").unwrap().unwrap().as_ref(), b"v1");
@@ -22,7 +22,7 @@ fn test_optimistic_transactiondb() {
 fn write_batch_works() {
     let path = TemporaryDBPath::new();
     {
-        let db = OptimisticTransactionDB::open_default(&path).unwrap();
+        let db = std::sync::Arc::new(OptimisticTransactionDB::open_default(&path).unwrap());
         {
             // test put
             let mut batch = WriteBatch::default();
@@ -61,7 +61,7 @@ fn write_batch_works() {
 pub fn test_optimistic_transaction() {
     let n = TemporaryDBPath::new();
     {
-        let db = OptimisticTransactionDB::open_default(&n).unwrap();
+        let db = std::sync::Arc::new(OptimisticTransactionDB::open_default(&n).unwrap());
 
         let trans = db.transaction_default();
 
@@ -97,6 +97,7 @@ pub fn test_optimistic_transaction() {
         assert!(!iter.valid());
         assert_eq!(iter.key(), None);
         assert_eq!(iter.value(), None);
+        drop(iter);
 
         let trans3 = db.transaction_default();
 
@@ -116,7 +117,7 @@ pub fn test_optimistic_transaction_rollback_savepoint() {
         let mut opts = Options::default();
         opts.create_if_missing(true);
 
-        let db = OptimisticTransactionDB::open(&opts, &path).unwrap();
+        let db = std::sync::Arc::new(OptimisticTransactionDB::open(&opts, &path).unwrap());
         let write_options = WriteOptions::default();
         let optimistic_transaction_options = OptimisticTransactionOptions::new();
 
@@ -166,7 +167,8 @@ pub fn test_optimistic_transaction_cf() {
         let mut opts = Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
-        let mut db = OptimisticTransactionDB::open_cf(&opts, &path, ["cf1"]).unwrap();
+        let mut db =
+            std::sync::Arc::new(OptimisticTransactionDB::open_cf(&opts, &path, ["cf1"]).unwrap());
         {
             let cf_handle = db.cf_handle("cf1").unwrap();
             let write_options = WriteOptions::default();
@@ -187,7 +189,10 @@ pub fn test_optimistic_transaction_cf() {
             trans.commit().unwrap();
         }
 
-        db.drop_cf("cf1").unwrap();
+        std::sync::Arc::get_mut(&mut db)
+            .unwrap()
+            .drop_cf("cf1")
+            .unwrap();
     }
 }
 
@@ -197,7 +202,7 @@ pub fn test_optimistic_transaction_snapshot() {
     {
         let mut opts = Options::default();
         opts.create_if_missing(true);
-        let db = OptimisticTransactionDB::open(&opts, &path).unwrap();
+        let db = std::sync::Arc::new(OptimisticTransactionDB::open(&opts, &path).unwrap());
 
         let write_options = WriteOptions::default();
         let optimistic_transaction_options = OptimisticTransactionOptions::new();
@@ -279,7 +284,7 @@ pub fn test_optimistic_transaction_merge() {
         let mut opts = Options::default();
         opts.create_if_missing(true);
         opts.set_merge_operator_associative("test operator", concat_merge);
-        let db = OptimisticTransactionDB::open(&opts, &path).unwrap();
+        let db = std::sync::Arc::new(OptimisticTransactionDB::open(&opts, &path).unwrap());
         let trans = db.transaction_default();
 
         trans.put(b"k1", b"a").unwrap();
@@ -321,7 +326,7 @@ impl TransWrapper {
 fn sync_transaction_test() {
     let n = TemporaryDBPath::new();
     {
-        let db = OptimisticTransactionDB::open_default(&n).unwrap();
+        let db = std::sync::Arc::new(OptimisticTransactionDB::open_default(&n).unwrap());
         let txn = db.transaction_default();
 
         assert!(txn.put(b"k1", b"v1").is_ok());
@@ -344,7 +349,7 @@ fn sync_transaction_test() {
 pub fn test_optimistic_transaction_multi_get() {
     let n = TemporaryDBPath::new();
     {
-        let db = OptimisticTransactionDB::open_default(&n).unwrap();
+        let db = std::sync::Arc::new(OptimisticTransactionDB::open_default(&n).unwrap());
 
         let trans = db.transaction_default();
 
@@ -378,7 +383,9 @@ pub fn test_optimistic_transaction_multi_get_cf() {
         let mut opts = Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
-        let mut db = OptimisticTransactionDB::open_cf(&opts, &path, ["cf0", "cf1"]).unwrap();
+        let mut db = std::sync::Arc::new(
+            OptimisticTransactionDB::open_cf(&opts, &path, ["cf0", "cf1"]).unwrap(),
+        );
         {
             let cf_handle0 = db.cf_handle("cf0").unwrap();
             let cf_handle1 = db.cf_handle("cf1").unwrap();
@@ -434,8 +441,14 @@ pub fn test_optimistic_transaction_multi_get_cf() {
             assert_eq!(values[11], None);
         }
 
-        db.drop_cf("cf0").unwrap();
-        db.drop_cf("cf1").unwrap();
+        std::sync::Arc::get_mut(&mut db)
+            .unwrap()
+            .drop_cf("cf0")
+            .unwrap();
+        std::sync::Arc::get_mut(&mut db)
+            .unwrap()
+            .drop_cf("cf1")
+            .unwrap();
     }
 }
 
@@ -444,7 +457,7 @@ fn multi_get() {
     let path = TemporaryDBPath::new();
 
     {
-        let db: OptimisticTransactionDB = OptimisticTransactionDB::open_default(&path).unwrap();
+        let db = std::sync::Arc::new(OptimisticTransactionDB::open_default(&path).unwrap());
         let initial_snap = db.snapshot();
         db.put(b"k1", b"v1").unwrap();
         let k1_snap = db.snapshot();
@@ -525,8 +538,9 @@ fn multi_get_cf() {
         let mut opts = Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
-        let db: OptimisticTransactionDB =
-            OptimisticTransactionDB::open_cf(&opts, &path, ["cf0", "cf1", "cf2"]).unwrap();
+        let db = std::sync::Arc::new(
+            OptimisticTransactionDB::open_cf(&opts, &path, ["cf0", "cf1", "cf2"]).unwrap(),
+        );
 
         let cf0 = db.cf_handle("cf0").unwrap();
 

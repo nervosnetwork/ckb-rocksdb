@@ -12,7 +12,6 @@ use crate::{
 use crate::ffi;
 use libc::{c_char, c_uchar, size_t};
 use std::collections::BTreeMap;
-use std::marker::PhantomData;
 use std::path::Path;
 use std::path::PathBuf;
 use std::ptr;
@@ -31,7 +30,7 @@ impl TransactionDB {
     }
 }
 
-impl Handle<ffi::rocksdb_transactiondb_t> for TransactionDB {
+unsafe impl Handle<ffi::rocksdb_transactiondb_t> for TransactionDB {
     fn handle(&self) -> *mut ffi::rocksdb_transactiondb_t {
         self.inner
     }
@@ -69,7 +68,7 @@ impl OpenRaw for TransactionDB {
         Ok(pointer)
     }
 
-    fn build<I>(
+    unsafe fn build<I>(
         path: PathBuf,
         _open_descriptor: Self::Descriptor,
         pointer: *mut Self::Pointer,
@@ -96,7 +95,7 @@ impl GetColumnFamilys for TransactionDB {
     fn get_cfs(&self) -> &BTreeMap<String, ColumnFamily> {
         &self.cfs
     }
-    fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily> {
+    unsafe fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily> {
         &mut self.cfs
     }
 }
@@ -130,10 +129,9 @@ impl TransactionBegin for TransactionDB {
 impl Iterate for TransactionDB {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
         unsafe {
-            DBRawIterator {
-                inner: ffi::rocksdb_transactiondb_create_iterator(self.inner, readopts.handle()),
-                db: PhantomData,
-            }
+            DBRawIterator::new(readopts, |readopts| {
+                ffi::rocksdb_transactiondb_create_iterator(self.inner, readopts.handle())
+            })
         }
     }
 }
@@ -141,18 +139,17 @@ impl Iterate for TransactionDB {
 impl IterateCF for TransactionDB {
     fn get_raw_iter_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
         unsafe {
-            Ok(DBRawIterator {
-                inner: ffi::rocksdb_transactiondb_create_iterator_cf(
+            Ok(DBRawIterator::new(readopts, |readopts| {
+                ffi::rocksdb_transactiondb_create_iterator_cf(
                     self.inner,
                     readopts.handle(),
                     cf_handle.handle(),
-                ),
-                db: PhantomData,
-            })
+                )
+            }))
         }
     }
 }
@@ -160,6 +157,9 @@ impl IterateCF for TransactionDB {
 impl Drop for TransactionDB {
     fn drop(&mut self) {
         unsafe {
+            for cf in self.cfs.values() {
+                ffi::rocksdb_column_family_handle_destroy(cf.inner);
+            }
             ffi::rocksdb_transactiondb_close(self.inner);
         }
     }
@@ -347,38 +347,26 @@ impl MultiGet<ReadOptions> for TransactionDB {
         let ro_handle = match ReadOptions::input_or_default(readopts, &mut default_readopts) {
             Ok(ro) => ro,
             Err(e) => {
-                let key_count = keys.into_iter().count();
-
-                return vec![e; key_count]
-                    .iter()
-                    .map(|e| Err(e.to_owned()))
-                    .collect();
+                return keys.into_iter().map(|_| Err(e.clone())).collect();
             }
         };
 
-        let (keys, keys_sizes): (Vec<Box<[u8]>>, Vec<_>) = keys
-            .into_iter()
-            .map(|k| (Box::from(k.as_ref()), k.as_ref().len()))
-            .unzip();
-        let ptr_keys: Vec<_> = keys.iter().map(|k| k.as_ptr() as *const c_char).collect();
-
-        let mut values = vec![ptr::null_mut(); keys.len()];
-        let mut values_sizes = vec![0_usize; keys.len()];
-        let mut errors = vec![ptr::null_mut(); keys.len()];
+        let keys = MultiGetKeys::new(keys);
+        let mut results = MultiGetResults::new(keys.len());
         unsafe {
             ffi::rocksdb_transactiondb_multi_get(
                 self.inner,
                 ro_handle,
-                ptr_keys.len(),
-                ptr_keys.as_ptr(),
-                keys_sizes.as_ptr(),
-                values.as_mut_ptr(),
-                values_sizes.as_mut_ptr(),
-                errors.as_mut_ptr(),
+                keys.len(),
+                keys.pointers.as_ptr(),
+                keys.sizes.as_ptr(),
+                results.values.as_mut_ptr(),
+                results.sizes.as_mut_ptr(),
+                results.errors.as_mut_ptr(),
             );
         }
 
-        convert_values(values, values_sizes, errors)
+        results.into_values()
     }
 }
 
@@ -396,45 +384,26 @@ impl MultiGetCF<ReadOptions> for TransactionDB {
         let ro_handle = match ReadOptions::input_or_default(readopts, &mut default_readopts) {
             Ok(ro) => ro,
             Err(e) => {
-                let key_count = keys.into_iter().count();
-
-                return vec![e; key_count]
-                    .iter()
-                    .map(|e| Err(e.to_owned()))
-                    .collect();
+                return keys.into_iter().map(|_| Err(e.clone())).collect();
             }
         };
-        let (cfs_and_keys, keys_sizes): (Vec<CFAndKey>, Vec<_>) = keys
-            .into_iter()
-            .map(|(cf, key)| ((cf, Box::from(key.as_ref())), key.as_ref().len()))
-            .unzip();
-        let ptr_keys: Vec<_> = cfs_and_keys
-            .iter()
-            .map(|(_, k)| k.as_ptr() as *const c_char)
-            .collect();
-        let ptr_cfs: Vec<_> = cfs_and_keys
-            .iter()
-            .map(|(c, _)| c.inner as *const _)
-            .collect();
-
-        let mut values = vec![ptr::null_mut(); ptr_keys.len()];
-        let mut values_sizes = vec![0_usize; ptr_keys.len()];
-        let mut errors = vec![ptr::null_mut(); ptr_keys.len()];
+        let (columns, keys) = MultiGetKeys::with_column_families(keys);
+        let mut results = MultiGetResults::new(keys.len());
         unsafe {
             ffi::rocksdb_transactiondb_multi_get_cf(
                 self.inner,
                 ro_handle,
-                ptr_cfs.as_ptr(),
-                ptr_keys.len(),
-                ptr_keys.as_ptr(),
-                keys_sizes.as_ptr(),
-                values.as_mut_ptr(),
-                values_sizes.as_mut_ptr(),
-                errors.as_mut_ptr(),
+                columns.as_ptr(),
+                keys.len(),
+                keys.pointers.as_ptr(),
+                keys.sizes.as_ptr(),
+                results.values.as_mut_ptr(),
+                results.sizes.as_mut_ptr(),
+                results.errors.as_mut_ptr(),
             );
         }
 
-        convert_values(values, values_sizes, errors)
+        results.into_values()
     }
 }
 
@@ -578,6 +547,7 @@ impl MergeCF<WriteOptions> for TransactionDB {
 
 impl CreateCF for TransactionDB {
     fn create_cf<N: AsRef<str>>(&mut self, name: N, opts: &Options) -> Result<(), Error> {
+        opts.outlive.retain_in(&mut self._outlive);
         let cname = to_cstring(
             name.as_ref(),
             "Failed to convert path to CString when opening rocksdb",
@@ -611,7 +581,7 @@ pub struct Snapshot<'a> {
     inner: *const ffi::rocksdb_snapshot_t,
 }
 
-impl ConstHandle<ffi::rocksdb_snapshot_t> for Snapshot<'_> {
+unsafe impl ConstHandle<ffi::rocksdb_snapshot_t> for Snapshot<'_> {
     fn const_handle(&self) -> *const ffi::rocksdb_snapshot_t {
         self.inner
     }
@@ -627,7 +597,8 @@ impl GetCF<ReadOptions> for Snapshot<'_> {
         readopts: Option<&ReadOptions>,
     ) -> Result<Option<DBVector>, Error> {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
 
         self.db.get_cf_full(cf, key, Some(&ro))
     }
@@ -644,7 +615,8 @@ impl MultiGet<ReadOptions> for Snapshot<'_> {
         I: IntoIterator<Item = K>,
     {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
 
         self.db.multi_get_full(keys, Some(&ro))
     }
@@ -661,7 +633,8 @@ impl MultiGetCF<ReadOptions> for Snapshot<'_> {
         I: IntoIterator<Item = (&'m ColumnFamily, K)>,
     {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
 
         self.db.multi_get_cf_full(keys, Some(&ro))
     }
@@ -678,7 +651,8 @@ impl Drop for Snapshot<'_> {
 impl Iterate for Snapshot<'_> {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
         let mut ro = readopts.to_owned();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
         self.db.get_raw_iter(&ro)
     }
 }
@@ -686,11 +660,12 @@ impl Iterate for Snapshot<'_> {
 impl IterateCF for Snapshot<'_> {
     fn get_raw_iter_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
         let mut ro = readopts.to_owned();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
         self.db.get_raw_iter_cf(cf_handle, &ro)
     }
 }

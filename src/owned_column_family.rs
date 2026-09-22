@@ -1,7 +1,7 @@
 //! Independently owned column families for shared optimistic databases.
 use crate::{
-    ColumnFamily, DBPinnableSlice, Error, OptimisticTransactionDB, Options, ReadOptions, ffi,
-    handle::Handle,
+    ColumnFamily, DBIterator, DBPinnableSlice, DBRawIterator, Error, IteratorMode,
+    OptimisticTransactionDB, Options, ReadOptions, ffi, handle::Handle,
 };
 use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 
@@ -21,6 +21,25 @@ pub struct OwnedColumnFamily {
 unsafe impl Sync for OwnedColumnFamily {}
 
 impl OwnedColumnFamily {
+    /// Iterate with an owned CF and database, so the iterator may outlive this Arc.
+    /// Snapshot pointers installed through unsafe read options must still remain
+    /// valid for the iterator's lifetime.
+    pub fn iterator_opt(
+        self: &Arc<Self>,
+        mode: IteratorMode<'_>,
+        options: &ReadOptions,
+    ) -> DBIterator<'static> {
+        let mut raw = DBRawIterator::new(options, |options| unsafe {
+            ffi::rocksdb_create_iterator_cf(
+                self.db.base_db_ptr(),
+                options.handle(),
+                self.inner.inner,
+            )
+        });
+        raw.column_family = Some(Arc::clone(self));
+        DBIterator::new(raw, mode)
+    }
+
     /// The physical column-family name supplied at creation or open.
     pub fn name(&self) -> &str {
         &self.name
@@ -92,7 +111,8 @@ impl OptimisticTransactionDB {
     /// allows application-level routing to publish immutable groups of families.
     pub fn into_shared_columns(mut self) -> (Arc<Self>, BTreeMap<String, Arc<OwnedColumnFamily>>) {
         use crate::ops::GetColumnFamilys;
-        let columns = std::mem::take(self.get_mut_cfs());
+        // Each transferred family acquires an Arc owner of this same database.
+        let columns = std::mem::take(unsafe { self.get_mut_cfs() });
         let db = Arc::new(self);
         let columns = columns
             .into_iter()
@@ -179,7 +199,7 @@ impl OptimisticTransactionDB {
             columns
         };
         if !error.is_null() {
-            return Err(Error::new(crate::ffi_util::error_message(error)));
+            return Err(Error::new(unsafe { crate::ffi_util::error_message(error) }));
         }
         Ok(columns)
     }

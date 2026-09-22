@@ -61,7 +61,6 @@
 
 use libc::{self, c_char, c_int, c_void, size_t};
 use std::ffi::CString;
-use std::mem;
 use std::ptr;
 use std::slice;
 
@@ -106,7 +105,7 @@ pub unsafe extern "C" fn name_callback<F: MergeFn, PF: MergeFn>(
     raw_cb: *mut c_void,
 ) -> *const c_char {
     unsafe {
-        let cb = &mut *(raw_cb as *mut MergeOperatorCallback<F, PF>);
+        let cb = &*(raw_cb as *const MergeOperatorCallback<F, PF>);
         cb.name.as_ptr()
     }
 }
@@ -124,7 +123,7 @@ pub unsafe extern "C" fn full_merge_callback<F: MergeFn, PF: MergeFn>(
     new_value_length: *mut size_t,
 ) -> *mut c_char {
     unsafe {
-        let cb = &mut *(raw_cb as *mut MergeOperatorCallback<F, PF>);
+        let cb = &*(raw_cb as *const MergeOperatorCallback<F, PF>);
         let operands = &mut MergeOperands::new(operands_list, operands_list_len, num_operands);
         let key = slice::from_raw_parts(raw_key as *const u8, key_len);
         let oldval = if existing_value.is_null() {
@@ -161,7 +160,7 @@ pub unsafe extern "C" fn partial_merge_callback<F: MergeFn, PF: MergeFn>(
     new_value_length: *mut size_t,
 ) -> *mut c_char {
     unsafe {
-        let cb = &mut *(raw_cb as *mut MergeOperatorCallback<F, PF>);
+        let cb = &*(raw_cb as *const MergeOperatorCallback<F, PF>);
         let operands = &mut MergeOperands::new(operands_list, operands_list_len, num_operands);
         let key = slice::from_raw_parts(raw_key as *const u8, key_len);
         (cb.partial_merge_fn)(key, None, operands).map_or_else(
@@ -210,15 +209,10 @@ impl<'a> Iterator for &'a mut MergeOperands {
             None
         } else {
             unsafe {
-                let base = self.operands_list as usize;
-                let base_len = self.operands_list_len as usize;
-                let spacing = mem::size_of::<*const *const u8>();
-                let spacing_len = mem::size_of::<*const size_t>();
-                let len_ptr = (base_len + (spacing_len * self.cursor)) as *const size_t;
-                let len = *len_ptr;
-                let ptr = base + (spacing * self.cursor);
+                let len = *self.operands_list_len.add(self.cursor);
+                let operand = self.operands_list.add(self.cursor);
                 self.cursor += 1;
-                Some(slice::from_raw_parts(*(ptr as *const *const u8), len))
+                Some(slice::from_raw_parts((*operand).cast(), len))
             }
         }
     }

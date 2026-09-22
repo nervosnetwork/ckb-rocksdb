@@ -1,0 +1,5 @@
+error[E0451]: field `inner` of struct `OptimisticTransactionOptions` is private
+ --> tests/fail/contracts/raw_options.rs:3:51
+  |
+3 |     let _options = OptimisticTransactionOptions { inner: std::ptr::null_mut() };
+  |                                                   ^^^^^ private field

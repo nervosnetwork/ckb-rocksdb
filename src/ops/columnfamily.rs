@@ -7,7 +7,10 @@ use std::collections::BTreeMap;
 pub trait GetColumnFamilys {
     fn get_cfs(&self) -> &BTreeMap<String, ColumnFamily>;
 
-    fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily>;
+    /// # Safety
+    /// Removed handles must not escape their DB or be used after destruction.
+    /// The caller is responsible for destroying each transferred handle once.
+    unsafe fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily>;
 
     /// Return the underlying column family handle.
     fn cf_handle(&self, name: &str) -> Option<&ColumnFamily> {
@@ -25,13 +28,15 @@ pub trait DropCF {
 
 impl<T> CreateCF for T
 where
-    T: Handle<ffi::rocksdb_t> + super::Write + GetColumnFamilys,
+    T: Handle<ffi::rocksdb_t> + super::Write + GetColumnFamilys + crate::db_options::RetainOptions,
 {
     fn create_cf<N: AsRef<str>>(&mut self, name: N, opts: &Options) -> Result<(), Error> {
         let c_name =
             crate::ffi_util::to_cstring(name.as_ref(), "column family name contains a NUL byte")?;
+        self.retain_options(opts);
         let column = ColumnFamily::create(self, &c_name, opts)?;
-        self.get_mut_cfs().insert(name.as_ref().to_owned(), column);
+        // The new family remains owned by this database.
+        unsafe { self.get_mut_cfs() }.insert(name.as_ref().to_owned(), column);
         Ok(())
     }
 }

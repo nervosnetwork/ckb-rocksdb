@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/fail/contracts/prefix_lifetime.rs:4:56
+  |
+4 |     let _transform = SliceTransform::create("invalid", retain_forever, None);
+  |                      ----------------------            ^^^^^^^^^^^^^^ one type is more general than the other
+  |                      |
+  |                      arguments to this function are incorrect
+  |
+  = note: expected fn pointer `for<'a> fn(&'a [u8]) -> &'a [u8]`
+                found fn item `fn(&'static [u8]) -> &'static [u8] {retain_forever}`
+note: associated function defined here
+ --> src/slice_transform.rs
+  |
+  |     pub fn create(
+  |            ^^^^^^

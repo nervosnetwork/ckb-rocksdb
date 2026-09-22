@@ -12,7 +12,6 @@ use crate::ffi;
 use crate::ffi_util::to_cpath;
 use libc::c_uchar;
 use std::collections::BTreeMap;
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
@@ -25,7 +24,7 @@ pub struct OptimisticTransactionDB {
     outlive: std::sync::Mutex<Vec<OptionsMustOutliveDB>>,
 }
 
-impl Handle<ffi::rocksdb_optimistictransactiondb_t> for OptimisticTransactionDB {
+unsafe impl Handle<ffi::rocksdb_optimistictransactiondb_t> for OptimisticTransactionDB {
     fn handle(&self) -> *mut ffi::rocksdb_optimistictransactiondb_t {
         self.inner
     }
@@ -60,7 +59,7 @@ impl OpenRaw for OptimisticTransactionDB {
         Ok(pointer)
     }
 
-    fn build<I>(
+    unsafe fn build<I>(
         path: PathBuf,
         _open_descriptor: Self::Descriptor,
         pointer: *mut Self::Pointer,
@@ -95,7 +94,7 @@ impl GetColumnFamilys for OptimisticTransactionDB {
     fn get_cfs(&self) -> &BTreeMap<String, ColumnFamily> {
         &self.cfs
     }
-    fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily> {
+    unsafe fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily> {
         &mut self.cfs
     }
 }
@@ -108,12 +107,7 @@ impl OptimisticTransactionDB {
             .expect("database resources lock poisoned");
         // Repeated CF generations normally share the same cache and environment.
         // Retain each resource combination once, including after a handle closes.
-        if !retained
-            .iter()
-            .any(|old| old.same_resources(&options.outlive))
-        {
-            retained.push(options.outlive.clone());
-        }
+        options.outlive.retain_in(&mut retained);
     }
 
     pub fn path(&self) -> &Path {
@@ -135,8 +129,9 @@ impl OptimisticTransactionDB {
         Ok(())
     }
 
+    /// Begin a transaction that retains this database through its `Arc` owner.
     pub fn transaction(
-        &self,
+        self: &std::sync::Arc<Self>,
         write_options: &WriteOptions,
         tx_options: &OptimisticTransactionOptions,
     ) -> OptimisticTransaction {
@@ -147,11 +142,11 @@ impl OptimisticTransactionDB {
                 tx_options.inner,
                 ptr::null_mut(),
             );
-            OptimisticTransaction::new(inner)
+            OptimisticTransaction::new(inner, std::sync::Arc::clone(self))
         }
     }
 
-    pub fn transaction_default(&self) -> OptimisticTransaction {
+    pub fn transaction_default(self: &std::sync::Arc<Self>) -> OptimisticTransaction {
         let write_options = WriteOptions::default();
         let transaction_options = OptimisticTransactionOptions::default();
         self.transaction(&write_options, &transaction_options)
@@ -171,7 +166,7 @@ impl Drop for OptimisticTransactionDB {
 }
 
 pub struct OptimisticTransactionOptions {
-    pub inner: *mut ffi::rocksdb_optimistictransaction_options_t,
+    pub(crate) inner: *mut ffi::rocksdb_optimistictransaction_options_t,
 }
 
 impl OptimisticTransactionOptions {
@@ -209,7 +204,7 @@ impl Default for OptimisticTransactionOptions {
     }
 }
 
-impl Handle<ffi::rocksdb_t> for OptimisticTransactionDB {
+unsafe impl Handle<ffi::rocksdb_t> for OptimisticTransactionDB {
     fn handle(&self) -> *mut ffi::rocksdb_t {
         self.base_db
     }
@@ -218,10 +213,9 @@ impl Handle<ffi::rocksdb_t> for OptimisticTransactionDB {
 impl Iterate for OptimisticTransactionDB {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
         unsafe {
-            DBRawIterator {
-                inner: ffi::rocksdb_create_iterator(self.base_db, readopts.handle()),
-                db: PhantomData,
-            }
+            DBRawIterator::new(readopts, |readopts| {
+                ffi::rocksdb_create_iterator(self.base_db, readopts.handle())
+            })
         }
     }
 }
@@ -229,18 +223,13 @@ impl Iterate for OptimisticTransactionDB {
 impl IterateCF for OptimisticTransactionDB {
     fn get_raw_iter_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
         unsafe {
-            Ok(DBRawIterator {
-                inner: ffi::rocksdb_create_iterator_cf(
-                    self.base_db,
-                    readopts.handle(),
-                    cf_handle.inner,
-                ),
-                db: PhantomData,
-            })
+            Ok(DBRawIterator::new(readopts, |readopts| {
+                ffi::rocksdb_create_iterator_cf(self.base_db, readopts.handle(), cf_handle.inner)
+            }))
         }
     }
 }
@@ -260,7 +249,7 @@ pub struct Snapshot<'a> {
     inner: *const ffi::rocksdb_snapshot_t,
 }
 
-impl ConstHandle<ffi::rocksdb_snapshot_t> for Snapshot<'_> {
+unsafe impl ConstHandle<ffi::rocksdb_snapshot_t> for Snapshot<'_> {
     fn const_handle(&self) -> *const ffi::rocksdb_snapshot_t {
         self.inner
     }
@@ -276,7 +265,8 @@ impl GetCF<ReadOptions> for Snapshot<'_> {
         readopts: Option<&ReadOptions>,
     ) -> Result<Option<DBVector>, Error> {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
 
         self.db.get_cf_full(cf, key, Some(&ro))
     }
@@ -293,7 +283,8 @@ impl MultiGet<ReadOptions> for Snapshot<'_> {
         I: IntoIterator<Item = K>,
     {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
 
         self.db.multi_get_full(keys, Some(&ro))
     }
@@ -310,7 +301,8 @@ impl MultiGetCF<ReadOptions> for Snapshot<'_> {
         I: IntoIterator<Item = (&'m ColumnFamily, K)>,
     {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
 
         self.db.multi_get_cf_full(keys, Some(&ro))
     }
@@ -327,7 +319,8 @@ impl Drop for Snapshot<'_> {
 impl Iterate for Snapshot<'_> {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
         let mut ro = readopts.to_owned();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
         self.db.get_raw_iter(&ro)
     }
 }
@@ -335,11 +328,18 @@ impl Iterate for Snapshot<'_> {
 impl IterateCF for Snapshot<'_> {
     fn get_raw_iter_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
         let mut ro = readopts.to_owned();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
         self.db.get_raw_iter_cf(cf_handle, &ro)
+    }
+}
+
+impl crate::db_options::RetainOptions for OptimisticTransactionDB {
+    fn retain_options(&mut self, options: &Options) {
+        OptimisticTransactionDB::retain_options(self, options);
     }
 }

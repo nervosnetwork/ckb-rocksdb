@@ -18,8 +18,7 @@ use crate::ops::*;
 /// Implementation of bindings to RocksDB Checkpoint[1] API
 ///
 /// [1]: https://github.com/facebook/rocksdb/wiki/Checkpoints
-use crate::{DB, Error};
-use std::ffi::CString;
+use crate::{DB, Error, ffi_util::to_cpath};
 use std::marker::PhantomData;
 use std::path::Path;
 
@@ -44,15 +43,10 @@ impl<'db> Checkpoint<'db> {
 
     /// Creates new physical DB checkpoint in directory specified by `path`.
     pub fn create_checkpoint<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
-        let path = path.as_ref();
-        let cpath = match CString::new(path.to_string_lossy().as_bytes()) {
-            Ok(c) => c,
-            Err(_) => {
-                return Err(Error::new(
-                    "Failed to convert path to CString when creating DB checkpoint".to_owned(),
-                ));
-            }
-        };
+        let cpath = to_cpath(
+            &path,
+            "Failed to convert path to CString when creating DB checkpoint",
+        )?;
 
         unsafe {
             ffi_try!(ffi::rocksdb_checkpoint_create(
