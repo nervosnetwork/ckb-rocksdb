@@ -20,8 +20,9 @@ if grep -Eq 'lib(jemalloc|uring)' "$native/native-features.ldd"; then
   cat "$native/native-features.ldd"
   exit 1
 fi
-strace -e io_uring_setup,io_uring_enter -o "$native/io-uring.trace" "$native/native-features"
-cat "$native/native-features.ldd" "$native/io-uring.trace"
+strace -e io_uring_setup,io_uring_enter -o "$native/io-uring.trace" "$native/native-features" > "$native/native-features.log"
+cat "$native/native-features.ldd" "$native/io-uring.trace" "$native/native-features.log"
+grep -Fx "$(git -C librocksdb-sys/rocksdb rev-parse HEAD)" "$native/native-features.log"
 grep -Eq 'io_uring_setup\(.*= [0-9]+' "$native/io-uring.trace"
 grep -Eq 'io_uring_enter\(.*= [0-9]+' "$native/io-uring.trace"
 strace -e io_uring_setup,io_uring_enter -o "$native/io-uring-denied.trace" "$native/native-features" --deny-io-uring

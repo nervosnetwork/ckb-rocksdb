@@ -63,6 +63,9 @@ fn check_retirement(atomic_flush: bool) {
             Instant::now() < deadline,
             "WAL retention stalled at {bytes} bytes"
         );
+        // WAL pressure is checked by writes. A pending flush may have finished
+        // since the last payload write, so give that check another opportunity.
+        db.put(b"pressure-probe", b"").unwrap();
         thread::sleep(Duration::from_millis(10));
     }
     drop((current, columns, db));

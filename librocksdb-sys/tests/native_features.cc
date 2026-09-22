@@ -1,5 +1,6 @@
 #include <rocksdb/c.h>
 #include <rocksdb/file_system.h>
+#include <rocksdb/version.h>
 
 #include <linux/filter.h>
 #include <linux/seccomp.h>
@@ -71,5 +72,6 @@ int main(int argc, char**) {
   assert(file->MultiRead(requests, 2, rocksdb::IOOptions(), nullptr).ok());
   assert(requests[0].status.ok() && requests[0].result == "first");
   assert(requests[1].status.ok() && requests[1].result == "second");
+  std::puts(rocksdb::GetRocksBuildProperties().at("rocksdb_build_git_sha").c_str());
   std::puts("jemalloc and MultiRead passed");
 }
