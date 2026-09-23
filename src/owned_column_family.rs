@@ -50,6 +50,7 @@ impl OwnedColumnFamily {
     /// All writes using this family must have finished before calling this method.
     /// Reads using existing handles and snapshots may finish afterwards. Calling
     /// this method again after a successful drop returns RocksDB's error.
+    /// See [`crate::ops::DropCF`] for WAL reclamation after retirement.
     /// An error can also occur after the native drop has taken effect (for
     /// example, writing OPTIONS). Reopen or re-enumerate before deciding to retry.
     pub fn drop_from_database(&self) -> Result<(), Error> {

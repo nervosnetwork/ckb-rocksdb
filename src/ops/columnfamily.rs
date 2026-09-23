@@ -22,6 +22,12 @@ pub trait CreateCF {
     fn create_cf<N: AsRef<str>>(&mut self, name: N, opts: &Options) -> Result<(), Error>;
 }
 
+/// Remove a column family from the database.
+///
+/// RocksDB 11.8.1 can retain obsolete WAL files after the last family using
+/// them is dropped. Applications that retire families regularly should write
+/// their own metadata to a live family and flush it after retirement. Flushing
+/// an empty memtable alone does not advance the persisted WAL boundary.
 pub trait DropCF {
     fn drop_cf(&mut self, name: &str) -> Result<(), Error>;
 }

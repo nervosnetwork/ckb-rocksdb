@@ -21,7 +21,7 @@ prioritize it.
 
 ## Usage
 
-This binding is statically linked with a specific version of RocksDB. If you
+This binding bundles the unmodified official RocksDB 11.8.1 release. If you
 want to build it yourself, make sure you've also cloned the RocksDB and
 compression submodules:
 

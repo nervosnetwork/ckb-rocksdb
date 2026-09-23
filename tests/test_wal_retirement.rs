@@ -8,12 +8,12 @@ use std::{
 };
 
 #[test]
-fn wal_limit_recovers_after_its_last_column_is_dropped() {
+fn metadata_flush_reclaims_wal_after_its_last_column_is_dropped() {
     check_retirement(false);
 }
 
 #[test]
-fn atomic_flush_recovers_after_the_last_wal_column_is_dropped() {
+fn metadata_flush_reclaims_wal_with_atomic_flush() {
     check_retirement(true);
 }
 
@@ -36,6 +36,11 @@ fn check_retirement(atomic_flush: bool) {
     let current = db.create_owned_cf("current", &options).unwrap();
     old.drop_from_database().unwrap();
     drop(old);
+    // DropCF does not advance the persisted WAL boundary in upstream 11.8.1.
+    // An empty flush is a no-op. Refreshing an application-owned metadata key
+    // and flushing its CF gives WAL pressure a durable boundary to advance to.
+    db.put(b"marker", b"durable").unwrap();
+    db.flush().unwrap();
     let value = vec![b'n'; 256 << 10];
     for key in 0u8..32 {
         db.put_cf(&current, [key], &value).unwrap();
