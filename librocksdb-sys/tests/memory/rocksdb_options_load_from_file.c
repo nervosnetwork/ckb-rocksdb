@@ -1,26 +1,23 @@
 #include "patches/rocksdb.h"
+#include <stdio.h>
 
-int main (int argc, char *argv[])
-{
-    const char* config_file = "rocksdb/tools/advisor/test/input_files/OPTIONS-000005";
-
-
+int main(void) {
     rocksdb_env_t* env = rocksdb_create_default_env();
-    bool ignore_unknown_options = false;
     rocksdb_cache_t* cache = rocksdb_cache_create_lru(1000);
-    char **errptr;
+    char* error = NULL;
+    rocksdb_fulloptions_t options = rocksdb_options_load_from_file(
+        "tests/memory/OPTIONS", env, false, cache, &error);
 
-    rocksdb_fulloptions_t fullopts = rocksdb_options_load_from_file(
-        config_file,
-        env,
-        ignore_unknown_options,
-        cache,
-        errptr);
-
-    rocksdb_env_destroy(env);
+    int result = 0;
+    if (error != NULL) {
+        fprintf(stderr, "%s\n", error);
+        rocksdb_free(error);
+        result = 1;
+    } else {
+        rocksdb_column_family_descriptors_destroy(options.cf_descs);
+        rocksdb_options_destroy(options.db_opts);
+    }
     rocksdb_cache_destroy(cache);
-
-    rocksdb_column_family_descriptors_destroy(fullopts.cf_descs);
-    rocksdb_options_destroy(fullopts.db_opts);
-    return 0;
+    rocksdb_env_destroy(env);
+    return result;
 }

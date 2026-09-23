@@ -45,6 +45,19 @@ pub struct WriteBatch {
     inner: *mut ffi::rocksdb_writebatch_t,
 }
 
+impl Clone for WriteBatch {
+    fn clone(&self) -> Self {
+        // The C API copies the serialized batch; both wrappers own their storage.
+        unsafe {
+            let mut size = 0;
+            let data = ffi::rocksdb_writebatch_data(self.inner, &mut size);
+            Self {
+                inner: ffi::rocksdb_writebatch_create_from(data, size),
+            }
+        }
+    }
+}
+
 impl WriteBatch {
     pub fn len(&self) -> usize {
         unsafe { ffi::rocksdb_writebatch_count(self.inner) as usize }
@@ -245,7 +258,7 @@ impl Drop for WriteBatch {
     }
 }
 
-impl Handle<ffi::rocksdb_writebatch_t> for WriteBatch {
+unsafe impl Handle<ffi::rocksdb_writebatch_t> for WriteBatch {
     fn handle(&self) -> *mut ffi::rocksdb_writebatch_t {
         self.inner
     }

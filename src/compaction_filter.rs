@@ -16,6 +16,7 @@
 use libc::{c_char, c_int, c_uchar, c_void, size_t};
 use std::ffi::{CStr, CString};
 use std::slice;
+use std::sync::Mutex;
 
 /// Decision about how to handle compacting an object
 ///
@@ -33,7 +34,7 @@ pub enum Decision {
 
 /// CompactionFilter allows an application to modify/delete a key-value at
 /// the time of compaction.
-pub trait CompactionFilter {
+pub trait CompactionFilter: Send {
     /// The compaction process invokes this
     /// method for kv that is being compacted. The application can inspect
     /// the existing value of the key and make decision based on it.
@@ -77,7 +78,7 @@ impl<F> CompactionFilterFn for F where F: FnMut(u32, &[u8], &[u8]) -> Decision +
 
 pub struct CompactionFilterCallback<F>
 where
-    F: CompactionFilterFn,
+    F: CompactionFilterFn + Send,
 {
     pub name: CString,
     pub filter_fn: F,
@@ -85,7 +86,7 @@ where
 
 impl<F> CompactionFilter for CompactionFilterCallback<F>
 where
-    F: CompactionFilterFn,
+    F: CompactionFilterFn + Send,
 {
     fn name(&self) -> &CStr {
         self.name.as_c_str()
@@ -96,26 +97,41 @@ where
     }
 }
 
-pub unsafe extern "C" fn destructor_callback<F>(raw_cb: *mut c_void)
+pub(crate) struct FilterCallback<F> {
+    // Names must remain stable even while another callback changes filter state.
+    name: CString,
+    filter: Mutex<F>,
+}
+
+impl<F: CompactionFilter> FilterCallback<F> {
+    pub fn new(filter: F) -> Self {
+        Self {
+            name: filter.name().to_owned(),
+            filter: Mutex::new(filter),
+        }
+    }
+}
+
+pub(crate) unsafe extern "C" fn destructor_callback<F>(raw_cb: *mut c_void)
 where
     F: CompactionFilter,
 {
     unsafe {
-        let _ = Box::from_raw(raw_cb as *mut F);
+        let _ = Box::from_raw(raw_cb as *mut FilterCallback<F>);
     }
 }
 
-pub unsafe extern "C" fn name_callback<F>(raw_cb: *mut c_void) -> *const c_char
+pub(crate) unsafe extern "C" fn name_callback<F>(raw_cb: *mut c_void) -> *const c_char
 where
     F: CompactionFilter,
 {
     unsafe {
-        let cb = &*(raw_cb as *mut F);
-        cb.name().as_ptr()
+        let cb = &*(raw_cb as *mut FilterCallback<F>);
+        cb.name.as_ptr()
     }
 }
 
-pub unsafe extern "C" fn filter_callback<F>(
+pub(crate) unsafe extern "C" fn filter_callback<F>(
     raw_cb: *mut c_void,
     level: c_int,
     raw_key: *const c_char,
@@ -132,10 +148,14 @@ where
     unsafe {
         use self::Decision::{Change, Keep, Remove};
 
-        let cb = &mut *(raw_cb as *mut F);
+        let cb = &*(raw_cb as *mut FilterCallback<F>);
         let key = slice::from_raw_parts(raw_key as *const u8, key_length);
         let oldval = slice::from_raw_parts(existing_value as *const u8, value_length);
-        let result = cb.filter(level as u32, key, oldval);
+        let result = cb
+            .filter
+            .lock()
+            .expect("compaction filter lock poisoned")
+            .filter(level as u32, key, oldval);
         match result {
             Keep => 0,
             Remove => 1,
@@ -180,4 +200,68 @@ fn compaction_filter_test() {
     }
     let result = DB::destroy(&opts, path);
     assert!(result.is_ok());
+}
+
+#[test]
+fn shared_native_filter_calls_serialize_mutable_state() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering},
+    };
+    let active = Arc::new(AtomicUsize::new(0));
+    let overlap = Arc::new(AtomicBool::new(false));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut local_calls = 0;
+    let filter = CompactionFilterCallback {
+        name: CString::new("concurrent-filter").unwrap(),
+        filter_fn: {
+            let active = Arc::clone(&active);
+            let overlap = Arc::clone(&overlap);
+            let calls = Arc::clone(&calls);
+            move |_: u32, _: &[u8], _: &[u8]| {
+                if active.fetch_add(1, Ordering::SeqCst) != 0 {
+                    overlap.store(true, Ordering::SeqCst);
+                }
+                local_calls += 1;
+                std::thread::yield_now();
+                calls.store(local_calls, Ordering::SeqCst);
+                active.fetch_sub(1, Ordering::SeqCst);
+                Decision::Keep
+            }
+        },
+    };
+    let mut callback = FilterCallback::new(filter);
+    let ptr = AtomicPtr::new(&mut callback);
+    fn call<F: CompactionFilter>(ptr: &AtomicPtr<FilterCallback<F>>) {
+        let mut value = std::ptr::null_mut();
+        let mut length = 0;
+        let mut changed = 0;
+        // The scoped workers share this live callback exactly as native
+        // concurrent compactions do. Output pointers belong to each call.
+        unsafe {
+            filter_callback::<F>(
+                ptr.load(Ordering::SeqCst).cast(),
+                0,
+                b"key".as_ptr().cast(),
+                3,
+                b"value".as_ptr().cast(),
+                5,
+                &mut value,
+                &mut length,
+                &mut changed,
+            );
+        }
+    }
+    std::thread::scope(|scope| {
+        for _ in 0..4 {
+            let ptr = &ptr;
+            scope.spawn(move || {
+                for _ in 0..100 {
+                    call(ptr);
+                }
+            });
+        }
+    });
+    assert!(!overlap.load(Ordering::SeqCst));
+    assert_eq!(calls.load(Ordering::SeqCst), 400);
 }

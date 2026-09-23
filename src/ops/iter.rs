@@ -8,13 +8,7 @@ pub trait Iterate {
         readopts: &ReadOptions,
         mode: IteratorMode<'_>,
     ) -> DBIterator<'b> {
-        let mut rv = DBIterator {
-            raw: self.get_raw_iter(readopts),
-            direction: Direction::Forward, // blown away by set_mode()
-            just_seeked: false,
-        };
-        rv.set_mode(mode);
-        rv
+        DBIterator::new(self.get_raw_iter(readopts), mode)
     }
 
     fn iterator_opt<'a: 'b, 'b>(
@@ -52,32 +46,30 @@ pub trait Iterate {
 }
 
 pub trait IterateCF: Iterate {
+    /// The iterator borrows both the database/transaction and the CF handle.
     fn get_raw_iter_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error>;
 
     fn get_iter_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         readopts: &ReadOptions,
         mode: IteratorMode<'_>,
     ) -> Result<DBIterator<'b>, Error> {
-        let mut rv = DBIterator {
-            raw: self.get_raw_iter_cf(cf_handle, readopts)?,
-            direction: Direction::Forward, // blown away by set_mode()
-            just_seeked: false,
-        };
-        rv.set_mode(mode);
-        Ok(rv)
+        Ok(DBIterator::new(
+            self.get_raw_iter_cf(cf_handle, readopts)?,
+            mode,
+        ))
     }
 
     /// Opens an interator using the provided ReadOptions.
     /// This is used when you want to iterate over a specific ColumnFamily with a modified ReadOptions
     fn iterator_cf_opt<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         mode: IteratorMode<'_>,
         readopts: &ReadOptions,
     ) -> Result<DBIterator<'b>, Error> {
@@ -86,7 +78,7 @@ pub trait IterateCF: Iterate {
 
     fn iterator_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         mode: IteratorMode<'_>,
     ) -> Result<DBIterator<'b>, Error> {
         let opts = ReadOptions::default();
@@ -95,7 +87,7 @@ pub trait IterateCF: Iterate {
 
     fn full_iterator_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         mode: IteratorMode<'_>,
     ) -> Result<DBIterator<'b>, Error> {
         let mut opts = ReadOptions::default();
@@ -105,7 +97,7 @@ pub trait IterateCF: Iterate {
 
     fn prefix_iterator_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         prefix: &[u8],
     ) -> Result<DBIterator<'b>, Error> {
         let mut opts = ReadOptions::default();
@@ -119,7 +111,7 @@ pub trait IterateCF: Iterate {
 
     fn raw_iterator_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
     ) -> Result<DBRawIterator<'b>, Error> {
         let opts = ReadOptions::default();
         self.get_raw_iter_cf(cf_handle, &opts)

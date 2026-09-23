@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{ColumnFamily, Options, handle::Handle};
+use crate::{ColumnFamily, Error, Options, handle::Handle};
 
 /// A descriptor for a RocksDB column family.
 ///
@@ -44,9 +44,24 @@ impl ColumnFamily {
     pub(crate) fn new(handle: *mut ffi::rocksdb_column_family_handle_t) -> ColumnFamily {
         ColumnFamily { inner: handle }
     }
+
+    pub(crate) fn create(
+        db: &impl Handle<ffi::rocksdb_t>,
+        name: &std::ffi::CStr,
+        options: &Options,
+    ) -> Result<Self, Error> {
+        let handle = unsafe {
+            ffi_try!(ffi::rocksdb_create_column_family(
+                db.handle(),
+                options.inner,
+                name.as_ptr(),
+            ))
+        };
+        Ok(Self::new(handle))
+    }
 }
 
-impl Handle<ffi::rocksdb_column_family_handle_t> for ColumnFamily {
+unsafe impl Handle<ffi::rocksdb_column_family_handle_t> for ColumnFamily {
     fn handle(&self) -> *mut ffi::rocksdb_column_family_handle_t {
         self.inner
     }

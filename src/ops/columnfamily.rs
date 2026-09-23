@@ -1,13 +1,16 @@
 use crate::ffi;
 
-use crate::{ColumnFamily, Error, Options, ffi_util::to_cstring, handle::Handle};
+use crate::{ColumnFamily, Error, Options, handle::Handle};
 
 use std::collections::BTreeMap;
 
 pub trait GetColumnFamilys {
     fn get_cfs(&self) -> &BTreeMap<String, ColumnFamily>;
 
-    fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily>;
+    /// # Safety
+    /// Removed handles must not escape their DB or be used after destruction.
+    /// The caller is responsible for destroying each transferred handle once.
+    unsafe fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily>;
 
     /// Return the underlying column family handle.
     fn cf_handle(&self, name: &str) -> Option<&ColumnFamily> {
@@ -19,29 +22,27 @@ pub trait CreateCF {
     fn create_cf<N: AsRef<str>>(&mut self, name: N, opts: &Options) -> Result<(), Error>;
 }
 
+/// Remove a column family from the database.
+///
+/// RocksDB 11.8.1 can retain obsolete WAL files after the last family using
+/// them is dropped. Applications that retire families regularly should write
+/// their own metadata to a live family and flush it after retirement. Flushing
+/// an empty memtable alone does not advance the persisted WAL boundary.
 pub trait DropCF {
     fn drop_cf(&mut self, name: &str) -> Result<(), Error>;
 }
 
 impl<T> CreateCF for T
 where
-    T: Handle<ffi::rocksdb_t> + super::Write + GetColumnFamilys,
+    T: Handle<ffi::rocksdb_t> + super::Write + GetColumnFamilys + crate::db_options::RetainOptions,
 {
     fn create_cf<N: AsRef<str>>(&mut self, name: N, opts: &Options) -> Result<(), Error> {
-        let cname = to_cstring(
-            name.as_ref(),
-            "Failed to convert path to CString when opening rocksdb",
-        )?;
-        unsafe {
-            let cf_handle = ffi_try!(ffi::rocksdb_create_column_family(
-                self.handle(),
-                opts.inner,
-                cname.as_ptr(),
-            ));
-
-            self.get_mut_cfs()
-                .insert(name.as_ref().to_string(), ColumnFamily::new(cf_handle));
-        };
+        let name = name.as_ref();
+        let c_name = crate::ffi_util::to_cstring(name, "column family name contains a NUL byte")?;
+        self.retain_options(opts);
+        let column = ColumnFamily::create(self, &c_name, opts)?;
+        // The new family remains owned by this database.
+        unsafe { self.get_mut_cfs() }.insert(name.to_owned(), column);
         Ok(())
     }
 }
@@ -52,11 +53,18 @@ where
 {
     fn drop_cf(&mut self, name: &str) -> Result<(), Error> {
         let cf = self
-            .get_mut_cfs()
-            .remove(name)
+            .get_cfs()
+            .get(name)
             .ok_or_else(|| Error::new(format!("Invalid column family: {}", name)))?;
         unsafe {
             ffi_try!(ffi::rocksdb_drop_column_family(self.handle(), cf.inner,));
+            // Keep the mapping on error, and release the native handle exactly once
+            // after a successful drop. Removing the Rust value alone leaked it.
+            let cf = self
+                .get_mut_cfs()
+                .remove(name)
+                .expect("column checked above");
+            ffi::rocksdb_column_family_handle_destroy(cf.inner);
         }
         Ok(())
     }

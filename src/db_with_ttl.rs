@@ -11,7 +11,6 @@ use crate::{
 };
 use std::collections::BTreeMap;
 use std::fmt;
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 pub struct DBWithTTL {
@@ -32,8 +31,10 @@ impl DBWithTTL {
         opts: &Options,
         ttl: i32,
     ) -> Result<(), Error> {
+        opts.outlive.retain_in(&mut self._outlive);
+        let name = name.as_ref();
         let cname = to_cstring(
-            name.as_ref(),
+            name,
             "Failed to convert path to CString when opening rocksdb",
         )?;
         unsafe {
@@ -45,7 +46,7 @@ impl DBWithTTL {
             ));
 
             self.get_mut_cfs()
-                .insert(name.as_ref().to_string(), ColumnFamily::new(cf_handle));
+                .insert(name.to_owned(), ColumnFamily::new(cf_handle));
         };
         Ok(())
     }
@@ -118,13 +119,7 @@ impl OpenRaw for DBWithTTL {
                     TTLs::Columns(ref ttls) => {
                         let ttls: Vec<_> = ttls.iter().map(|t| *t as libc::c_int).collect();
 
-                        let is_ttls_match = if input.num_column_families <= 0 {
-                            ttls.len() as i32 == 1
-                        } else {
-                            ttls.len() as i32 == input.num_column_families
-                        };
-
-                        if !is_ttls_match {
+                        if ttls.len() as i32 != input.num_column_families {
                             return Err(Error::new(
                                 "Ttls size has to be the same as number of column families"
                                     .to_owned(),
@@ -150,7 +145,7 @@ impl OpenRaw for DBWithTTL {
         Ok(pointer)
     }
 
-    fn build<I>(
+    unsafe fn build<I>(
         path: PathBuf,
         _open_descriptor: Self::Descriptor,
         pointer: *mut Self::Pointer,
@@ -173,7 +168,7 @@ impl OpenRaw for DBWithTTL {
     }
 }
 
-impl Handle<ffi::rocksdb_t> for DBWithTTL {
+unsafe impl Handle<ffi::rocksdb_t> for DBWithTTL {
     fn handle(&self) -> *mut ffi::rocksdb_t {
         self.inner
     }
@@ -182,10 +177,9 @@ impl Handle<ffi::rocksdb_t> for DBWithTTL {
 impl ops::Iterate for DBWithTTL {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
         unsafe {
-            DBRawIterator {
-                inner: ffi::rocksdb_create_iterator(self.inner, readopts.handle()),
-                db: PhantomData,
-            }
+            DBRawIterator::new(readopts, |readopts| {
+                ffi::rocksdb_create_iterator(self.inner, readopts.handle())
+            })
         }
     }
 }
@@ -193,18 +187,13 @@ impl ops::Iterate for DBWithTTL {
 impl ops::IterateCF for DBWithTTL {
     fn get_raw_iter_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
         unsafe {
-            Ok(DBRawIterator {
-                inner: ffi::rocksdb_create_iterator_cf(
-                    self.inner,
-                    readopts.handle(),
-                    cf_handle.inner,
-                ),
-                db: PhantomData,
-            })
+            Ok(DBRawIterator::new(readopts, |readopts| {
+                ffi::rocksdb_create_iterator_cf(self.inner, readopts.handle(), cf_handle.inner)
+            }))
         }
     }
 }
@@ -213,7 +202,7 @@ impl ops::GetColumnFamilys for DBWithTTL {
     fn get_cfs(&self) -> &BTreeMap<String, ColumnFamily> {
         &self.cfs
     }
-    fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily> {
+    unsafe fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily> {
         &mut self.cfs
     }
 }
@@ -238,5 +227,11 @@ impl Drop for DBWithTTL {
 impl fmt::Debug for DBWithTTL {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Read-only RocksDB {{ path: {:?} }}", self.path())
+    }
+}
+
+impl crate::db_options::RetainOptions for DBWithTTL {
+    fn retain_options(&mut self, options: &Options) {
+        options.outlive.retain_in(&mut self._outlive);
     }
 }

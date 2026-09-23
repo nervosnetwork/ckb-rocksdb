@@ -1,34 +1,80 @@
 [package]
 name = "ckb-librocksdb-sys"
-version = "10.7.5"
+version = "11.8.1"
 edition = "2024"
+rust-version = "1.95.0"
 authors = ["Karl Hobley <karlhobley10@gmail.com>", "Arkadiy Paronyan <arkadiy@ethcore.io>", "Nervos Core Dev <dev@nervos.org>"]
-license = "MIT/Apache-2.0/BSD-3-Clause"
+license = "Apache-2.0 AND MIT AND BSD-2-Clause AND BSD-3-Clause AND Zlib AND bzip2-1.0.6"
 description = "Native bindings to librocksdb"
 readme = "README.md"
 repository = "https://github.com/nervosnetwork/ckb-rocksdb"
-keywords = [ "ffi", "rocksdb" ]
+keywords = ["ffi", "rocksdb"]
+categories = ["external-ffi-bindings", "database"]
+documentation = "https://docs.rs/ckb-librocksdb-sys"
 
 build = "build.rs"
 links = "rocksdb"
 
-exclude = [
-    ".gitignore",
-    "*.yml",
-    "snappy/testdata",
-    "*/doc",
-    "*/docs",
-    "*/examples",
-    "*/tests",
-    "tests",
-    "*.md",
+include = [
+    "src/**",
+    "tests/**",
+    "patches/**",
+    "build.rs",
+    "build_version.cc",
+    "rocksdb_lib_sources.txt",
+    "snappy-stubs-public.h",
+    "LICENSE",
+    "README.md",
+    "rocksdb/**/*.cc",
+    "rocksdb/**/*.h",
+    "rocksdb/**/*.inc",
+    "rocksdb/build_tools/build_detect_platform",
+    "rocksdb/build_tools/version.sh",
+    "rocksdb/LICENSE*",
+    "rocksdb/COPYING",
+    "rocksdb/**/COPYING.*",
+    "!rocksdb/**/*_test.cc",
+    "!rocksdb/**/*_bench.cc",
+    "!rocksdb/java/**",
+    "!rocksdb/tools/**",
+    "rocksdb/tools/dump/db_dump_tool.cc",
+    "rocksdb/tools/dump/db_dump_tool.h",
+    "!rocksdb/db_stress_tool/**",
+    "!rocksdb/examples/**",
+    "!rocksdb/fuzz/**",
+    "!rocksdb/microbench/**",
+    "snappy/*.cc",
+    "snappy/*.h",
+    "snappy/COPYING",
+    "!snappy/*test*",
+    "!snappy/*bench*",
+    "lz4/lib/*.c",
+    "lz4/lib/*.h",
+    "lz4/lib/LICENSE",
+    "zstd/lib/**/*.c",
+    "zstd/lib/**/*.h",
+    "zstd/lib/**/*.S",
+    "zstd/LICENSE",
+    "zlib/*.c",
+    "zlib/*.h",
+    "zlib/LICENSE",
+    "bzip2/*.c",
+    "bzip2/*.h",
+    "bzip2/LICENSE",
+    "liburing/configure",
+    "liburing/Makefile.common",
+    "liburing/Makefile.quiet",
+    "liburing/liburing.spec",
+    "liburing/src/**",
+    "liburing/LICENSE",
+    "liburing/COPYING*",
 ]
 
 [features]
 default = [ "static" ]
 portable = []
 march-native = []
-jemalloc = []
+jemalloc = ["dep:tikv-jemalloc-sys"]
 io-uring = []
 static = []
 snappy = []
@@ -39,18 +85,18 @@ bzip2 = []
 lto = []
 rtti = []
 
-
 [dependencies]
-libc = "0.2"
-pkg-config = "0.3"
+libc = "0.2.189"
+
+# Share CKB's allocator ABI instead of linking a second jemalloc implementation.
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+tikv-jemalloc-sys = { version = "0.5.4", optional = true, features = ["unprefixed_malloc_on_supported_platforms"] }
 
 [dev-dependencies]
-const-cstr = "0.3"
-uuid = { version = "1.0", features = ["v4"] }
+const-cstr = "0.3.0"
+uuid = { version = "1.26.1", features = ["v4"] }
 
 [build-dependencies]
-cc = { version = "1.0", features = ["parallel"] }
-bindgen = { version = "0.72.1" }
-glob = "0.3.3"
-pkg-config = "0.3"
-rust-ini = "0.21"
+cc = { version = "1.4.6", features = ["parallel"] }
+bindgen = "0.73.2"
+glob = "0.3.4"

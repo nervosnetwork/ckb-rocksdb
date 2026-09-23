@@ -21,7 +21,12 @@ use std::ptr;
 
 use crate::Error;
 
-pub fn error_message(ptr: *const c_char) -> String {
+/// Copies and releases a RocksDB-owned error string.
+///
+/// # Safety
+/// `ptr` must be a non-null, NUL-terminated string allocated by RocksDB and
+/// exclusively owned by this call. It is released with `rocksdb_free`.
+pub unsafe fn error_message(ptr: *const c_char) -> String {
     let cstr = unsafe { CStr::from_ptr(ptr as *const _) };
     let s = String::from_utf8_lossy(cstr.to_bytes()).into_owned();
     unsafe {

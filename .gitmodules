@@ -13,3 +13,6 @@
 [submodule "librocksdb-sys/zlib"]
 	path = librocksdb-sys/zlib
 	url = https://github.com/madler/zlib.git
+[submodule "librocksdb-sys/liburing"]
+	path = librocksdb-sys/liburing
+	url = https://github.com/axboe/liburing.git

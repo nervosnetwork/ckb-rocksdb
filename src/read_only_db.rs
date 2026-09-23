@@ -27,7 +27,6 @@ use crate::{
 use libc::c_uchar;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 pub struct ReadOnlyDB {
@@ -80,7 +79,7 @@ impl OpenRaw for ReadOnlyDB {
         Ok(pointer)
     }
 
-    fn build<I>(
+    unsafe fn build<I>(
         path: PathBuf,
         _open_descriptor: Self::Descriptor,
         pointer: *mut Self::Pointer,
@@ -103,7 +102,7 @@ impl OpenRaw for ReadOnlyDB {
     }
 }
 
-impl Handle<ffi::rocksdb_t> for ReadOnlyDB {
+unsafe impl Handle<ffi::rocksdb_t> for ReadOnlyDB {
     fn handle(&self) -> *mut ffi::rocksdb_t {
         self.inner
     }
@@ -112,10 +111,9 @@ impl Handle<ffi::rocksdb_t> for ReadOnlyDB {
 impl ops::Iterate for ReadOnlyDB {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
         unsafe {
-            DBRawIterator {
-                inner: ffi::rocksdb_create_iterator(self.inner, readopts.handle()),
-                db: PhantomData,
-            }
+            DBRawIterator::new(readopts, |readopts| {
+                ffi::rocksdb_create_iterator(self.inner, readopts.handle())
+            })
         }
     }
 }
@@ -123,18 +121,13 @@ impl ops::Iterate for ReadOnlyDB {
 impl ops::IterateCF for ReadOnlyDB {
     fn get_raw_iter_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
         unsafe {
-            Ok(DBRawIterator {
-                inner: ffi::rocksdb_create_iterator_cf(
-                    self.inner,
-                    readopts.handle(),
-                    cf_handle.inner,
-                ),
-                db: PhantomData,
-            })
+            Ok(DBRawIterator::new(readopts, |readopts| {
+                ffi::rocksdb_create_iterator_cf(self.inner, readopts.handle(), cf_handle.inner)
+            }))
         }
     }
 }
@@ -143,7 +136,7 @@ impl ops::GetColumnFamilys for ReadOnlyDB {
     fn get_cfs(&self) -> &BTreeMap<String, ColumnFamily> {
         &self.cfs
     }
-    fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily> {
+    unsafe fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily> {
         &mut self.cfs
     }
 }

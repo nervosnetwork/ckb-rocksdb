@@ -1,130 +1,139 @@
-
 name: RocksDB CI
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUSTUP_TOOLCHAIN: 1.95.0
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+
 jobs:
   fmt:
     name: Rustfmt
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v6
-      - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.89.0
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
           components: rustfmt
-      - name: Check formatting
-        run: |
-          cargo fmt --all -- --check
+      - run: cargo fmt --all -- --check
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           submodules: true
-      - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.89.0
-          components: clippy rustfmt
-      - run: sudo apt update && sudo apt install -y libclang-dev
-      - name: Run clippy
-        run: |
-          make clippy
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+          components: clippy
+      - run: sudo apt-get update && sudo apt-get install -y libclang-dev
+      - run: make clippy
 
   valgrind:
     name: valgrind
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
     steps:
-      - run: sudo apt update && sudo apt install -y valgrind libclang-dev
-      - name: Checkout sources
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           submodules: true
-      - name: run test
-        working-directory: librocksdb-sys
-        run: make test
-
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+      - run: sudo apt-get update && sudo apt-get install -y valgrind libclang-dev jq
+      - run: make -C librocksdb-sys test
 
   test:
     name: ${{ matrix.build }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
+      fail-fast: false
       matrix:
-        build: [Linux, macOS, windows-2022]
         include:
           - build: Linux
             os: ubuntu-22.04
+            features: jemalloc,io-uring
+            native-features: true
+          - build: Linux (portable)
+            os: ubuntu-22.04
+            features: portable,snappy,lz4,serde1
+            args: --no-default-features
+          - build: Linux (march-native)
+            os: ubuntu-22.04
+            features: march-native,jemalloc,io-uring
           - build: macOS
             os: macos-latest
+            # Linux feature flags must also be harmless on other platforms.
+            features: portable,jemalloc,io-uring,serde1
           - build: windows-2022
             os: windows-2022
+            features: jemalloc,io-uring
     steps:
-      - name: Maximize build space
-        if: runner.os == 'Linux'
-        uses: easimon/maximize-build-space@master
-        with:
-          root-reserve-mb: 512
-          swap-size-mb: 1024
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
-      - name: Delete huge unnecessary tools folder
-        if: runner.os == 'Linux'
-        run: rm -rf /opt/hostedtoolcache
-      - name: Checkout sources
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           submodules: true
-      - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.89.0
-          target: ${{ matrix.target }}
-          components: rustfmt
-      - name: Remove msys64 # Workaround to resolve link error with C:\msys64\mingw64\bin\libclang.dll
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+      - name: Cache Cargo downloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
-        run: Remove-Item -LiteralPath "C:\msys64\" -Force -Recurse
-      - name: Install dependencies
-        if: runner.os == 'Windows'
-        run: choco install llvm -y
+        shell: pwsh
+        run: |
+          choco install llvm -y --no-progress
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install llvm lld
+        run: |
+          brew install llvm
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libclang-dev libjemalloc-dev liburing-dev
-      - name: Debug librocksdb-sys tests
-        if: runner.os == 'Linux' || runner.os == 'Windows'
-        run: clang --version && env
-      - name: Run librocksdb-sys tests
-        if: runner.os == 'Linux' || runner.os == 'Windows'
-        run: |
-          cargo test --manifest-path=librocksdb-sys/Cargo.toml -vvvvv
-      - name: Run rocksdb tests
-        if: runner.os == 'Linux' || runner.os == 'Windows'
-        run: |
-          cargo test
-      - name: Run rocksdb tests (jemalloc)
-        if: runner.os == 'Linux'
-        run: |
-          cargo test --features jemalloc
-      - name: Run rocksdb tests (io-uring)
-        if: runner.os == 'Linux'
-        run: |
-          cargo test --features io-uring
-      - name: Run rocksdb tests (portable)
-        if: runner.os == 'Linux' || runner.os == 'macOS'
-        run: |
-          cargo test --features portable
-      - name: Run rocksdb tests (march-native)
-        if: runner.os == 'Linux'
-        run: |
-          cargo test --features march-native
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev strace jq
+      - name: Build test binaries
+        if: matrix.native-features
+        shell: bash
+        run: cargo test --locked --workspace ${{ matrix.args }} --features '${{ matrix.features }}' --no-run --message-format=json > native-build.json
+      - name: Run tests
+        run: cargo test --locked --workspace ${{ matrix.args }} --features '${{ matrix.features }}'
+      - name: Verify native linking and io-uring fallback
+        if: matrix.native-features
+        run: bash ci/test-native-features.sh native-build.json
+
+  package:
+    name: Publish dry run
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+      - run: sudo apt-get update && sudo apt-get install -y libclang-dev
+      - name: Verify both packaged crates, including Linux features
+        run: sh ci/publish-dry-run.sh

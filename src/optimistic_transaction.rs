@@ -1,54 +1,59 @@
 use crate::ffi;
+use crate::transaction_state::TransactionState;
 use crate::{
-    ColumnFamily, DBPinnableSlice, DBRawIterator, DBVector, Error, ReadOptions, ffi_util,
+    ColumnFamily, DBPinnableSlice, DBRawIterator, DBVector, Error, ReadOptions,
     handle::{ConstHandle, Handle},
     ops::*,
 };
-use libc::{c_char, c_uchar, c_void, size_t};
-use std::marker::PhantomData;
-use std::ptr;
+use libc::c_void;
+use std::sync::Arc;
 
+/// An owned transaction that keeps its database alive and serializes native access.
+///
+/// Writes return an error while a transaction iterator is alive. Commit, rollback
+/// and rollback to a savepoint also require transaction snapshots to be dropped.
 pub struct OptimisticTransaction {
-    inner: *mut ffi::rocksdb_transaction_t,
+    inner: Arc<TransactionState>,
+    _db: Arc<crate::OptimisticTransactionDB>,
 }
 
-unsafe impl Send for OptimisticTransaction {}
-unsafe impl Sync for OptimisticTransaction {}
-
 impl OptimisticTransaction {
-    pub(crate) fn new(inner: *mut ffi::rocksdb_transaction_t) -> OptimisticTransaction {
-        OptimisticTransaction { inner }
+    pub(crate) fn new(
+        inner: *mut ffi::rocksdb_transaction_t,
+        db: Arc<crate::OptimisticTransactionDB>,
+    ) -> OptimisticTransaction {
+        OptimisticTransaction {
+            inner: TransactionState::new(inner),
+            _db: db,
+        }
     }
 
     /// commits a transaction
     pub fn commit(&self) -> Result<(), Error> {
-        unsafe {
-            ffi_try!(ffi::rocksdb_transaction_commit(self.inner,));
-        }
-        Ok(())
+        self.inner.commit()
     }
 
     /// Transaction rollback
     pub fn rollback(&self) -> Result<(), Error> {
-        unsafe { ffi_try!(ffi::rocksdb_transaction_rollback(self.inner,)) }
-        Ok(())
+        self.inner.rollback()
     }
 
     /// Transaction rollback to savepoint
     pub fn rollback_to_savepoint(&self) -> Result<(), Error> {
-        unsafe { ffi_try!(ffi::rocksdb_transaction_rollback_to_savepoint(self.inner,)) }
-        Ok(())
+        self.inner.rollback_to_savepoint()
     }
 
     /// Set savepoint for transaction
     pub fn set_savepoint(&self) {
-        unsafe { ffi::rocksdb_transaction_set_savepoint(self.inner) }
+        self.inner.set_savepoint()
     }
 
     /// Get Snapshot
     pub fn snapshot(&self) -> OptimisticTransactionSnapshot<'_> {
+        let mut _state = self.inner.lock();
+        _state.snapshots += 1;
         unsafe {
-            let snapshot = ffi::rocksdb_transaction_get_snapshot(self.inner);
+            let snapshot = ffi::rocksdb_transaction_get_snapshot(self.inner.raw);
             OptimisticTransactionSnapshot {
                 txn: self,
                 inner: snapshot,
@@ -71,26 +76,7 @@ impl OptimisticTransaction {
         readopts: &ReadOptions,
         exclusive: bool,
     ) -> Result<Option<DBVector>, Error> {
-        let key = key.as_ref();
-        let key_ptr = key.as_ptr() as *const c_char;
-        let key_len = key.len() as size_t;
-        unsafe {
-            let mut val_len: size_t = 0;
-            let val = ffi_try!(ffi::rocksdb_transaction_get_for_update(
-                self.handle(),
-                readopts.handle(),
-                key_ptr,
-                key_len,
-                &mut val_len,
-                exclusive as c_uchar,
-            )) as *mut u8;
-
-            if val.is_null() {
-                Ok(None)
-            } else {
-                Ok(Some(DBVector::from_c(val, val_len)))
-            }
-        }
+        self.inner.get_for_update(None, &key, readopts, exclusive)
     }
 
     pub fn get_for_update_cf<K: AsRef<[u8]>>(
@@ -109,41 +95,14 @@ impl OptimisticTransaction {
         readopts: &ReadOptions,
         exclusive: bool,
     ) -> Result<Option<DBVector>, Error> {
-        let key = key.as_ref();
-        let key_ptr = key.as_ptr() as *const c_char;
-        let key_len = key.len() as size_t;
-        unsafe {
-            let mut val_len: size_t = 0;
-            let val = ffi_try!(ffi::rocksdb_transaction_get_for_update_cf(
-                self.handle(),
-                readopts.handle(),
-                cf.handle(),
-                key_ptr,
-                key_len,
-                &mut val_len,
-                exclusive as c_uchar,
-            )) as *mut u8;
-
-            if val.is_null() {
-                Ok(None)
-            } else {
-                Ok(Some(DBVector::from_c(val, val_len)))
-            }
-        }
-    }
-}
-
-impl Drop for OptimisticTransaction {
-    fn drop(&mut self) {
-        unsafe {
-            ffi::rocksdb_transaction_destroy(self.inner);
-        }
-    }
-}
-
-impl Handle<ffi::rocksdb_transaction_t> for OptimisticTransaction {
-    fn handle(&self) -> *mut ffi::rocksdb_transaction_t {
         self.inner
+            .get_for_update(Some(cf), &key, readopts, exclusive)
+    }
+}
+
+unsafe impl Handle<ffi::rocksdb_transaction_t> for OptimisticTransaction {
+    fn handle(&self) -> *mut ffi::rocksdb_transaction_t {
+        self.inner.raw
     }
 }
 
@@ -156,41 +115,7 @@ impl GetCF<ReadOptions> for OptimisticTransaction {
         key: K,
         readopts: Option<&ReadOptions>,
     ) -> Result<Option<DBVector>, Error> {
-        let mut default_readopts = None;
-
-        let ro_handle = ReadOptions::input_or_default(readopts, &mut default_readopts)?;
-
-        let key = key.as_ref();
-        let key_ptr = key.as_ptr() as *const c_char;
-        let key_len = key.len() as size_t;
-
-        unsafe {
-            let mut val_len: size_t = 0;
-
-            let val = match cf {
-                Some(cf) => ffi_try!(ffi::rocksdb_transaction_get_cf(
-                    self.handle(),
-                    ro_handle,
-                    cf.inner,
-                    key_ptr,
-                    key_len,
-                    &mut val_len,
-                )),
-                None => ffi_try!(ffi::rocksdb_transaction_get(
-                    self.handle(),
-                    ro_handle,
-                    key_ptr,
-                    key_len,
-                    &mut val_len,
-                )),
-            } as *mut u8;
-
-            if val.is_null() {
-                Ok(None)
-            } else {
-                Ok(Some(DBVector::from_c(val, val_len)))
-            }
-        }
+        self.inner.get(cf, &key, readopts)
     }
 }
 
@@ -204,42 +129,7 @@ impl MultiGet<ReadOptions> for OptimisticTransaction {
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
-        let mut default_readopts = None;
-        let ro_handle = match ReadOptions::input_or_default(readopts, &mut default_readopts) {
-            Ok(ro) => ro,
-            Err(e) => {
-                let key_count = keys.into_iter().count();
-
-                return vec![e; key_count]
-                    .iter()
-                    .map(|e| Err(e.to_owned()))
-                    .collect();
-            }
-        };
-
-        let (keys, keys_sizes): (Vec<Box<[u8]>>, Vec<_>) = keys
-            .into_iter()
-            .map(|k| (Box::from(k.as_ref()), k.as_ref().len()))
-            .unzip();
-        let ptr_keys: Vec<_> = keys.iter().map(|k| k.as_ptr() as *const c_char).collect();
-
-        let mut values = vec![ptr::null_mut(); keys.len()];
-        let mut values_sizes = vec![0_usize; keys.len()];
-        let mut errors = vec![ptr::null_mut(); keys.len()];
-        unsafe {
-            ffi::rocksdb_transaction_multi_get(
-                self.inner,
-                ro_handle,
-                ptr_keys.len(),
-                ptr_keys.as_ptr(),
-                keys_sizes.as_ptr(),
-                values.as_mut_ptr(),
-                values_sizes.as_mut_ptr(),
-                errors.as_mut_ptr(),
-            );
-        }
-
-        convert_values(values, values_sizes, errors)
+        self.inner.multi_get(keys, readopts)
     }
 }
 
@@ -253,60 +143,16 @@ impl MultiGetCF<ReadOptions> for OptimisticTransaction {
         K: AsRef<[u8]>,
         I: IntoIterator<Item = (&'a ColumnFamily, K)>,
     {
-        let mut default_readopts = None;
-        let ro_handle = match ReadOptions::input_or_default(readopts, &mut default_readopts) {
-            Ok(ro) => ro,
-            Err(e) => {
-                let key_count = keys.into_iter().count();
-
-                return vec![e; key_count]
-                    .iter()
-                    .map(|e| Err(e.to_owned()))
-                    .collect();
-            }
-        };
-
-        let (cfs_and_keys, keys_sizes): (Vec<CFAndKey>, Vec<_>) = keys
-            .into_iter()
-            .map(|(cf, key)| ((cf, Box::from(key.as_ref())), key.as_ref().len()))
-            .unzip();
-        let ptr_keys: Vec<_> = cfs_and_keys
-            .iter()
-            .map(|(_, k)| k.as_ptr() as *const c_char)
-            .collect();
-        let ptr_cfs: Vec<_> = cfs_and_keys
-            .iter()
-            .map(|(c, _)| c.inner as *const _)
-            .collect();
-
-        let mut values = vec![ptr::null_mut(); ptr_keys.len()];
-        let mut values_sizes = vec![0_usize; ptr_keys.len()];
-        let mut errors = vec![ptr::null_mut(); ptr_keys.len()];
-        unsafe {
-            ffi::rocksdb_transaction_multi_get_cf(
-                self.inner,
-                ro_handle,
-                ptr_cfs.as_ptr(),
-                ptr_keys.len(),
-                ptr_keys.as_ptr(),
-                keys_sizes.as_ptr(),
-                values.as_mut_ptr(),
-                values_sizes.as_mut_ptr(),
-                errors.as_mut_ptr(),
-            );
-        }
-
-        convert_values(values, values_sizes, errors)
+        self.inner.multi_get_cf(keys, readopts)
     }
 }
 
 impl Iterate for OptimisticTransaction {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
         unsafe {
-            DBRawIterator {
-                inner: ffi::rocksdb_transaction_create_iterator(self.inner, readopts.handle()),
-                db: PhantomData,
-            }
+            self.inner.iterator(readopts, |readopts| {
+                ffi::rocksdb_transaction_create_iterator(self.inner.raw, readopts.handle())
+            })
         }
     }
 }
@@ -314,18 +160,17 @@ impl Iterate for OptimisticTransaction {
 impl IterateCF for OptimisticTransaction {
     fn get_raw_iter_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
         unsafe {
-            Ok(DBRawIterator {
-                inner: ffi::rocksdb_transaction_create_iterator_cf(
-                    self.inner,
+            Ok(self.inner.iterator(readopts, |readopts| {
+                ffi::rocksdb_transaction_create_iterator_cf(
+                    self.inner.raw,
                     readopts.handle(),
                     cf_handle.inner,
-                ),
-                db: PhantomData,
-            })
+                )
+            }))
         }
     }
 }
@@ -342,34 +187,7 @@ impl PutCF<()> for OptimisticTransaction {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        let key = key.as_ref();
-        let value = value.as_ref();
-        let key_ptr = key.as_ptr() as *const c_char;
-        let key_len = key.len() as size_t;
-        let val_ptr = value.as_ptr() as *const c_char;
-        let val_len = value.len() as size_t;
-
-        unsafe {
-            match cf {
-                Some(cf) => ffi_try!(ffi::rocksdb_transaction_put_cf(
-                    self.handle(),
-                    cf.handle(),
-                    key_ptr,
-                    key_len,
-                    val_ptr,
-                    val_len,
-                )),
-                None => ffi_try!(ffi::rocksdb_transaction_put(
-                    self.handle(),
-                    key_ptr,
-                    key_len,
-                    val_ptr,
-                    val_len,
-                )),
-            }
-
-            Ok(())
-        }
+        self.inner.put(cf, &key, &value)
     }
 }
 
@@ -385,34 +203,7 @@ impl MergeCF<()> for OptimisticTransaction {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        let key = key.as_ref();
-        let value = value.as_ref();
-        let key_ptr = key.as_ptr() as *const c_char;
-        let key_len = key.len() as size_t;
-        let val_ptr = value.as_ptr() as *const c_char;
-        let val_len = value.len() as size_t;
-
-        unsafe {
-            match cf {
-                Some(cf) => ffi_try!(ffi::rocksdb_transaction_merge_cf(
-                    self.handle(),
-                    cf.handle(),
-                    key_ptr,
-                    key_len,
-                    val_ptr,
-                    val_len,
-                )),
-                None => ffi_try!(ffi::rocksdb_transaction_merge(
-                    self.handle(),
-                    key_ptr,
-                    key_len,
-                    val_ptr,
-                    val_len,
-                )),
-            }
-
-            Ok(())
-        }
+        self.inner.merge(cf, &key, &value)
     }
 }
 
@@ -426,27 +217,7 @@ impl DeleteCF<()> for OptimisticTransaction {
     where
         K: AsRef<[u8]>,
     {
-        let key = key.as_ref();
-        let key_ptr = key.as_ptr() as *const c_char;
-        let key_len = key.len() as size_t;
-
-        unsafe {
-            match cf {
-                Some(cf) => ffi_try!(ffi::rocksdb_transaction_delete_cf(
-                    self.handle(),
-                    cf.inner,
-                    key_ptr,
-                    key_len,
-                )),
-                None => ffi_try!(ffi::rocksdb_transaction_delete(
-                    self.handle(),
-                    key_ptr,
-                    key_len,
-                )),
-            }
-
-            Ok(())
-        }
+        self.inner.delete(cf, &key)
     }
 }
 
@@ -458,7 +229,7 @@ pub struct OptimisticTransactionSnapshot<'a> {
 unsafe impl Send for OptimisticTransactionSnapshot<'_> {}
 unsafe impl Sync for OptimisticTransactionSnapshot<'_> {}
 
-impl ConstHandle<ffi::rocksdb_snapshot_t> for OptimisticTransactionSnapshot<'_> {
+unsafe impl ConstHandle<ffi::rocksdb_snapshot_t> for OptimisticTransactionSnapshot<'_> {
     fn const_handle(&self) -> *const ffi::rocksdb_snapshot_t {
         self.inner
     }
@@ -474,7 +245,8 @@ impl GetCF<ReadOptions> for OptimisticTransactionSnapshot<'_> {
         readopts: Option<&ReadOptions>,
     ) -> Result<Option<DBVector>, Error> {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
         self.txn.get_cf_full(cf, key, Some(&ro))
     }
 }
@@ -490,7 +262,8 @@ impl MultiGet<ReadOptions> for OptimisticTransactionSnapshot<'_> {
         I: IntoIterator<Item = K>,
     {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
         self.txn.multi_get_full(keys, Some(&ro))
     }
 }
@@ -506,7 +279,8 @@ impl MultiGetCF<ReadOptions> for OptimisticTransactionSnapshot<'_> {
         I: IntoIterator<Item = (&'m ColumnFamily, K)>,
     {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
         self.txn.multi_get_cf_full(keys, Some(&ro))
     }
 }
@@ -514,7 +288,9 @@ impl MultiGetCF<ReadOptions> for OptimisticTransactionSnapshot<'_> {
 impl Drop for OptimisticTransactionSnapshot<'_> {
     fn drop(&mut self) {
         unsafe {
+            let mut views = self.txn.inner.lock();
             ffi::rocksdb_free(self.inner as *mut c_void);
+            views.snapshots -= 1;
         }
     }
 }
@@ -522,7 +298,8 @@ impl Drop for OptimisticTransactionSnapshot<'_> {
 impl Iterate for OptimisticTransactionSnapshot<'_> {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
         let mut readopts = readopts.to_owned();
-        readopts.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { readopts.set_snapshot(self) };
         self.txn.get_raw_iter(&readopts)
     }
 }
@@ -530,11 +307,12 @@ impl Iterate for OptimisticTransactionSnapshot<'_> {
 impl IterateCF for OptimisticTransactionSnapshot<'_> {
     fn get_raw_iter_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
         let mut readopts = readopts.to_owned();
-        readopts.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { readopts.set_snapshot(self) };
         self.txn.get_raw_iter_cf(cf_handle, &readopts)
     }
 }
@@ -549,44 +327,7 @@ impl<'a> GetPinnedCF<'a> for OptimisticTransaction {
         key: K,
         readopts: Option<Self::ReadOptions>,
     ) -> Result<Option<DBPinnableSlice<'a>>, Error> {
-        let mut default_readopts = None;
-
-        let ro_handle = ReadOptions::input_or_default(readopts, &mut default_readopts)?;
-
-        let key = key.as_ref();
-        let key_ptr = key.as_ptr() as *const c_char;
-        let key_len = key.len() as size_t;
-
-        unsafe {
-            let mut err: *mut ::libc::c_char = ::std::ptr::null_mut();
-            let val = match cf {
-                Some(cf) => ffi::rocksdb_transaction_get_pinned_cf(
-                    self.handle(),
-                    ro_handle,
-                    cf.handle(),
-                    key_ptr,
-                    key_len,
-                    &mut err,
-                ),
-                None => ffi::rocksdb_transaction_get_pinned(
-                    self.handle(),
-                    ro_handle,
-                    key_ptr,
-                    key_len,
-                    &mut err,
-                ),
-            };
-
-            if !err.is_null() {
-                return Err(Error::new(ffi_util::error_message(err)));
-            }
-
-            if val.is_null() {
-                Ok(None)
-            } else {
-                Ok(Some(DBPinnableSlice::from_c(val)))
-            }
-        }
+        self.inner.get_pinned(cf, &key, readopts)
     }
 }
 
@@ -601,41 +342,9 @@ impl<'a> GetPinnedCF<'a> for OptimisticTransactionSnapshot<'a> {
         readopts: Option<Self::ReadOptions>,
     ) -> ::std::result::Result<Option<DBPinnableSlice<'a>>, Error> {
         let mut ro = readopts.cloned().unwrap_or_default();
-        ro.set_snapshot(self);
+        // The adapter and its returned reads borrow this same snapshot.
+        unsafe { ro.set_snapshot(self) };
 
-        let key = key.as_ref();
-        let key_ptr = key.as_ptr() as *const c_char;
-        let key_len = key.len() as size_t;
-
-        unsafe {
-            let mut err: *mut ::libc::c_char = ::std::ptr::null_mut();
-            let val = match cf {
-                Some(cf) => ffi::rocksdb_transaction_get_pinned_cf(
-                    self.txn.handle(),
-                    ro.handle(),
-                    cf.handle(),
-                    key_ptr,
-                    key_len,
-                    &mut err,
-                ),
-                None => ffi::rocksdb_transaction_get_pinned(
-                    self.txn.handle(),
-                    ro.handle(),
-                    key_ptr,
-                    key_len,
-                    &mut err,
-                ),
-            };
-
-            if !err.is_null() {
-                return Err(Error::new(ffi_util::error_message(err)));
-            }
-
-            if val.is_null() {
-                Ok(None)
-            } else {
-                Ok(Some(DBPinnableSlice::from_c(val)))
-            }
-        }
+        self.txn.inner.get_pinned(cf, &key, Some(&ro))
     }
 }

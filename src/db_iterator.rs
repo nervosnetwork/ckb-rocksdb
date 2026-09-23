@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 
-use crate::ops::Iterate;
+use crate::{Error, ops::Iterate};
 use libc::{c_char, c_uchar, size_t};
 use std::marker::PhantomData;
 use std::slice;
@@ -21,10 +21,8 @@ use std::slice;
 /// An iterator over a database or column family, with specifiable
 /// ranges and direction.
 ///
-/// This iterator is different to the standard ``DBIterator`` as it aims Into
-/// replicate the underlying iterator API within RocksDB itself. This should
-/// give access to more performance and flexibility but departs from the
-/// widely recognised Rust idioms.
+/// Exposes RocksDB's cursor API for explicit seeking and borrowed key/value
+/// access. Use [`DBIterator`] for standard Rust iteration.
 ///
 /// ```
 /// use ckb_rocksdb::prelude::*;
@@ -70,12 +68,17 @@ use std::slice;
 ///
 /// # }
 /// ```
-unsafe impl Sync for DBRawIterator<'_> {}
-
 pub struct DBRawIterator<'a> {
     pub(crate) inner: *mut ffi::rocksdb_iterator_t,
-    pub(crate) db: PhantomData<&'a dyn Iterate>,
+    db: PhantomData<&'a dyn Iterate>,
+    _readopts: Option<Box<crate::ReadOptions>>,
+    pub(crate) transaction: Option<std::sync::Arc<crate::transaction_state::TransactionState>>,
+    pub(crate) column_family: Option<std::sync::Arc<crate::OwnedColumnFamily>>,
 }
+
+// RocksDB permits concurrent const iterator operations. Shared Rust methods
+// only observe the cursor; seeking and advancing require exclusive access.
+unsafe impl Sync for DBRawIterator<'_> {}
 
 /// An iterator over a database or column family, with specifiable
 /// ranges and direction.
@@ -135,8 +138,39 @@ pub enum IteratorMode<'a> {
 }
 
 impl DBRawIterator<'_> {
+    pub(crate) fn new(
+        readopts: &crate::ReadOptions,
+        create: impl FnOnce(&crate::ReadOptions) -> *mut ffi::rocksdb_iterator_t,
+    ) -> Self {
+        // RocksDB copies scalar options, but borrows the bound Slice objects in
+        // the native read options as well as their Rust-owned key bytes. Create
+        // the iterator from its own options so both live until after destruction.
+        // Unbounded iterators need no retained options or additional allocation.
+        let retained = readopts
+            .has_iterate_bounds()
+            .then(|| Box::new(readopts.clone()));
+        let inner = create(retained.as_deref().unwrap_or(readopts));
+        Self {
+            inner,
+            db: PhantomData,
+            _readopts: retained,
+            transaction: None,
+            column_family: None,
+        }
+    }
+
+    /// Return an I/O or corruption error that stopped this iterator, if any.
+    /// Call this after reaching the end to distinguish errors from normal exhaustion.
+    pub fn status(&self) -> Result<(), Error> {
+        let _transaction = self.transaction.as_ref().map(|state| state.lock());
+        unsafe {
+            ffi_try!(ffi::rocksdb_iter_get_error(self.inner,));
+        }
+        Ok(())
+    }
     /// Returns true if the iterator is valid.
     pub fn valid(&self) -> bool {
+        let _transaction = self.transaction.as_ref().map(|state| state.lock());
         unsafe { ffi::rocksdb_iter_valid(self.inner) != 0 }
     }
 
@@ -175,6 +209,7 @@ impl DBRawIterator<'_> {
     /// # }
     /// ```
     pub fn seek_to_first(&mut self) {
+        let _transaction = self.transaction.as_ref().map(|state| state.lock());
         unsafe {
             ffi::rocksdb_iter_seek_to_first(self.inner);
         }
@@ -215,6 +250,7 @@ impl DBRawIterator<'_> {
     /// # }
     /// ```
     pub fn seek_to_last(&mut self) {
+        let _transaction = self.transaction.as_ref().map(|state| state.lock());
         unsafe {
             ffi::rocksdb_iter_seek_to_last(self.inner);
         }
@@ -251,6 +287,7 @@ impl DBRawIterator<'_> {
     /// ```
     pub fn seek<K: AsRef<[u8]>>(&mut self, key: K) {
         let key = key.as_ref();
+        let _transaction = self.transaction.as_ref().map(|state| state.lock());
 
         unsafe {
             ffi::rocksdb_iter_seek(
@@ -293,6 +330,7 @@ impl DBRawIterator<'_> {
     /// ```
     pub fn seek_for_prev<K: AsRef<[u8]>>(&mut self, key: K) {
         let key = key.as_ref();
+        let _transaction = self.transaction.as_ref().map(|state| state.lock());
 
         unsafe {
             ffi::rocksdb_iter_seek_for_prev(
@@ -307,6 +345,7 @@ impl DBRawIterator<'_> {
     ///
     /// Returns true if the iterator is valid after this operation.
     pub fn next(&mut self) {
+        let _transaction = self.transaction.as_ref().map(|state| state.lock());
         unsafe {
             ffi::rocksdb_iter_next(self.inner);
         }
@@ -316,6 +355,7 @@ impl DBRawIterator<'_> {
     ///
     /// Returns true if the iterator is valid after this operation.
     pub fn prev(&mut self) {
+        let _transaction = self.transaction.as_ref().map(|state| state.lock());
         unsafe {
             ffi::rocksdb_iter_prev(self.inner);
         }
@@ -327,6 +367,7 @@ impl DBRawIterator<'_> {
             // Safety Note: This is safe as all methods that may invalidate the buffer returned
             // take `&mut self`, so borrow checker will prevent use of buffer after seek.
             unsafe {
+                let _transaction = self.transaction.as_ref().map(|state| state.lock());
                 let mut key_len: size_t = 0;
                 let key_len_ptr: *mut size_t = &mut key_len;
                 let key_ptr = ffi::rocksdb_iter_key(self.inner, key_len_ptr) as *const c_uchar;
@@ -343,6 +384,7 @@ impl DBRawIterator<'_> {
             // Safety Note: This is safe as all methods that may invalidate the buffer returned
             // take `&mut self`, so borrow checker will prevent use of buffer after seek.
             unsafe {
+                let _transaction = self.transaction.as_ref().map(|state| state.lock());
                 let mut val_len: size_t = 0;
                 let val_len_ptr: *mut size_t = &mut val_len;
                 let val_ptr = ffi::rocksdb_iter_value(self.inner, val_len_ptr) as *const c_uchar;
@@ -353,17 +395,55 @@ impl DBRawIterator<'_> {
             None
         }
     }
-}
 
-impl Drop for DBRawIterator<'_> {
-    fn drop(&mut self) {
+    /// Returns the current key and value after a single validity check.
+    pub fn item(&self) -> Option<(&[u8], &[u8])> {
+        if !self.valid() {
+            return None;
+        }
+        // SAFETY: validity was checked above. Operations that move the iterator
+        // require an exclusive borrow, so both buffers remain valid for `self`.
         unsafe {
-            ffi::rocksdb_iter_destroy(self.inner);
+            let _transaction = self.transaction.as_ref().map(|state| state.lock());
+            let mut key_len = 0;
+            let mut value_len = 0;
+            let key = ffi::rocksdb_iter_key(self.inner, &mut key_len) as *const u8;
+            let value = ffi::rocksdb_iter_value(self.inner, &mut value_len) as *const u8;
+            Some((
+                slice::from_raw_parts(key, key_len),
+                slice::from_raw_parts(value, value_len),
+            ))
         }
     }
 }
 
-impl DBIterator<'_> {
+impl Drop for DBRawIterator<'_> {
+    fn drop(&mut self) {
+        let _transaction = self.transaction.as_ref().map(|state| state.lock());
+        unsafe {
+            ffi::rocksdb_iter_destroy(self.inner);
+            if let Some(mut views) = _transaction {
+                views.iterators -= 1;
+            }
+        }
+    }
+}
+
+impl<'a> DBIterator<'a> {
+    pub(crate) fn new(raw: DBRawIterator<'a>, mode: IteratorMode<'_>) -> Self {
+        let mut iterator = Self {
+            raw,
+            direction: Direction::Forward,
+            just_seeked: false,
+        };
+        iterator.set_mode(mode);
+        iterator
+    }
+
+    /// Return an I/O or corruption error that stopped this iterator, if any.
+    pub fn status(&self) -> Result<(), Error> {
+        self.raw.status()
+    }
     pub fn set_mode(&mut self, mode: IteratorMode) {
         match mode {
             IteratorMode::Start => {
@@ -410,15 +490,9 @@ impl Iterator for DBIterator<'_> {
             self.just_seeked = false;
         }
 
-        if self.raw.valid() {
-            // .key() and .value() only ever return None if valid == false, which we've just cheked
-            Some((
-                Box::from(self.raw.key().unwrap()),
-                Box::from(self.raw.value().unwrap()),
-            ))
-        } else {
-            None
-        }
+        self.raw
+            .item()
+            .map(|(key, value)| (Box::from(key), Box::from(value)))
     }
 }
 

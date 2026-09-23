@@ -24,19 +24,19 @@ use crate::ffi;
 /// to store prefix blooms by setting prefix_extractor in
 /// ColumnFamilyOptions.
 pub struct SliceTransform {
-    pub inner: *mut ffi::rocksdb_slicetransform_t,
+    pub(crate) inner: *mut ffi::rocksdb_slicetransform_t,
 }
 
-// NB we intentionally don't implement a Drop that passes
-// through to rocksdb_slicetransform_destroy because
-// this is currently only used (to my knowledge)
-// by people passing it as a prefix extractor when
-// opening a DB.
+impl Drop for SliceTransform {
+    fn drop(&mut self) {
+        unsafe { ffi::rocksdb_slicetransform_destroy(self.inner) };
+    }
+}
 
 impl SliceTransform {
     pub fn create(
         name: &str,
-        transform_fn: TransformFn<'_>,
+        transform_fn: TransformFn,
         in_domain_fn: Option<InDomainFn>,
     ) -> SliceTransform {
         let cb = Box::into_raw(Box::new(TransformCallback {
@@ -51,8 +51,6 @@ impl SliceTransform {
                 Some(slice_transform_destructor_callback),
                 Some(transform_callback),
                 Some(in_domain_callback),
-                // this None points to the deprecated InRange callback
-                None,
                 Some(slice_transform_name_callback),
             )
         };
@@ -73,24 +71,24 @@ impl SliceTransform {
     }
 }
 
-pub type TransformFn<'a> = fn(&'a [u8]) -> &'a [u8];
+pub type TransformFn = for<'a> fn(&'a [u8]) -> &'a [u8];
 pub type InDomainFn = fn(&[u8]) -> bool;
 
-pub struct TransformCallback<'a> {
+pub struct TransformCallback {
     pub name: CString,
-    pub transform_fn: TransformFn<'a>,
+    pub transform_fn: TransformFn,
     pub in_domain_fn: Option<InDomainFn>,
 }
 
 pub unsafe extern "C" fn slice_transform_destructor_callback(raw_cb: *mut c_void) {
     unsafe {
-        let _ = Box::from_raw(raw_cb as *mut TransformCallback<'_>);
+        let _ = Box::from_raw(raw_cb as *mut TransformCallback);
     }
 }
 
 pub unsafe extern "C" fn slice_transform_name_callback(raw_cb: *mut c_void) -> *const c_char {
     unsafe {
-        let cb = &mut *(raw_cb as *mut TransformCallback<'_>);
+        let cb = &*(raw_cb as *const TransformCallback);
         cb.name.as_ptr()
     }
 }
@@ -102,7 +100,7 @@ pub unsafe extern "C" fn transform_callback(
     dst_length: *mut size_t,
 ) -> *mut c_char {
     unsafe {
-        let cb = &mut *(raw_cb as *mut TransformCallback<'_>);
+        let cb = &*(raw_cb as *const TransformCallback);
         let key = slice::from_raw_parts(raw_key as *const u8, key_len);
         let prefix = (cb.transform_fn)(key);
         *dst_length = prefix.len() as size_t;
@@ -116,7 +114,7 @@ pub unsafe extern "C" fn in_domain_callback(
     key_len: size_t,
 ) -> u8 {
     unsafe {
-        let cb = &mut *(raw_cb as *mut TransformCallback<'_>);
+        let cb = &*(raw_cb as *const TransformCallback);
         let key = slice::from_raw_parts(raw_key as *const u8, key_len);
         if let Some(in_domain) = cb.in_domain_fn {
             in_domain(key) as u8

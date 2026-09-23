@@ -1,0 +1,17 @@
+error[E0505]: cannot move out of `cf` because it is borrowed
+  --> tests/fail/contracts/transaction_cf_iterator.rs:10:10
+   |
+ 7 |     let cf = db.create_owned_cf("owned", &Options::default()).unwrap();
+   |         -- binding `cf` declared here
+ 8 |     let txn = db.transaction_default();
+ 9 |     let mut iter = txn.raw_iterator_cf(&cf).unwrap();
+   |                                        --- borrow of `cf` occurs here
+10 |     drop(cf);
+   |          ^^ move out of `cf` occurs here
+11 |     iter.seek_to_first();
+   |     ---- borrow later used here
+   |
+help: clone the value to increment its reference count
+   |
+ 9 |     let mut iter = txn.raw_iterator_cf(&cf.clone()).unwrap();
+   |                                           ++++++++

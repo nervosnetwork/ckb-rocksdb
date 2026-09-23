@@ -40,6 +40,7 @@ pub use self::get_pinned::{GetPinned, GetPinnedCF};
 pub use self::ingest_external_file::{IngestExternalFile, IngestExternalFileCF};
 pub use self::merge::{Merge, MergeCF};
 pub use self::multi_get::{BatchedMultiGetCF, CFAndKey, MultiGet, MultiGetCF, convert_values};
+pub(crate) use self::multi_get::{MultiGetKeys, MultiGetResults};
 pub use self::put::{Put, PutCF};
 pub use self::writebatch::WriteOps;
 
@@ -58,7 +59,7 @@ pub use self::columnfamily::CreateCF;
 pub use self::columnfamily::DropCF;
 pub use self::columnfamily::GetColumnFamilys;
 pub use self::compact::{CompactRange, CompactRangeCF};
-pub use self::flush::Flush;
+pub use self::flush::{Flush, FlushCF, FlushWal};
 pub use self::iter::{Iterate, IterateCF};
 pub use self::property::{GetProperty, GetPropertyCF};
 pub use self::setoptions::SetOptions;

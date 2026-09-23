@@ -28,7 +28,6 @@ use crate::{
 use std::collections::BTreeMap;
 use std::ffi::CStr;
 use std::fmt;
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::slice;
 
@@ -42,7 +41,7 @@ pub struct DB {
     _outlive: Vec<OptionsMustOutliveDB>,
 }
 
-impl Handle<ffi::rocksdb_t> for DB {
+unsafe impl Handle<ffi::rocksdb_t> for DB {
     fn handle(&self) -> *mut ffi::rocksdb_t {
         self.inner
     }
@@ -74,7 +73,7 @@ impl OpenRaw for DB {
         Ok(pointer)
     }
 
-    fn build<I>(
+    unsafe fn build<I>(
         path: PathBuf,
         _open_descriptor: Self::Descriptor,
         pointer: *mut Self::Pointer,
@@ -183,10 +182,9 @@ impl fmt::Debug for DB {
 impl Iterate for DB {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
         unsafe {
-            DBRawIterator {
-                inner: ffi::rocksdb_create_iterator(self.inner, readopts.handle()),
-                db: PhantomData,
-            }
+            DBRawIterator::new(readopts, |readopts| {
+                ffi::rocksdb_create_iterator(self.inner, readopts.handle())
+            })
         }
     }
 }
@@ -194,18 +192,13 @@ impl Iterate for DB {
 impl IterateCF for DB {
     fn get_raw_iter_cf<'a: 'b, 'b>(
         &'a self,
-        cf_handle: &ColumnFamily,
+        cf_handle: &'b ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
         unsafe {
-            Ok(DBRawIterator {
-                inner: ffi::rocksdb_create_iterator_cf(
-                    self.inner,
-                    readopts.handle(),
-                    cf_handle.inner,
-                ),
-                db: PhantomData,
-            })
+            Ok(DBRawIterator::new(readopts, |readopts| {
+                ffi::rocksdb_create_iterator_cf(self.inner, readopts.handle(), cf_handle.inner)
+            }))
         }
     }
 }
@@ -214,7 +207,7 @@ impl GetColumnFamilys for DB {
     fn get_cfs(&self) -> &BTreeMap<String, ColumnFamily> {
         &self.cfs
     }
-    fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily> {
+    unsafe fn get_mut_cfs(&mut self) -> &mut BTreeMap<String, ColumnFamily> {
         &mut self.cfs
     }
 }
@@ -413,5 +406,11 @@ fn set_option_test() {
             ("report_bg_io_stats", "true"),
         ];
         db.set_options(&multiple_options).unwrap();
+    }
+}
+
+impl crate::db_options::RetainOptions for DB {
+    fn retain_options(&mut self, options: &Options) {
+        options.outlive.retain_in(&mut self._outlive);
     }
 }

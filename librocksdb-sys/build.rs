@@ -6,64 +6,58 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const RUST_TARGET: &str = "1.89.0";
-// On these platforms jemalloc-sys will use a prefixed jemalloc which cannot be linked together
-// with RocksDB.
-// See https://github.com/tikv/jemallocator/blob/tikv-jemalloc-sys-0.5.3/jemalloc-sys/src/env.rs#L25
-const NO_JEMALLOC_TARGETS: &[&str] = &["android", "dragonfly", "musl", "darwin"];
+const RUST_TARGET: &str = "1.95.0";
 
 fn get_flags_from_detect_platform_script() -> Option<Vec<String>> {
-    if !cfg!(target_os = "windows") {
-        let mut cmd = Command::new("bash");
-
-        // if ROCKSDB_USE_IO_URING is not set, treat as enable
-        // we use pkg_config probe library, more friendly for rust.
-        cmd.env("ROCKSDB_USE_IO_URING", "0");
-
-        if cfg!(feature = "static") {
-            cmd.env("LIB_MODE", "static");
-        }
-
-        if cfg!(feature = "portable") {
-            cmd.env("PORTABLE", "1");
-        } else if !cfg!(feature = "march-native") {
-            cmd.env("PORTABLE", "1");
-            cmd.env("USE_SSE", "1");
-        }
-
-        let output = cmd
-            .arg("build_detect_platform")
-            .output()
-            .expect("failed to execute process");
-        if output.status.success() {
-            let raw = String::from_utf8_lossy(&output.stdout);
-            if let Ok(ini) = ini::Ini::load_from_str(&raw) {
-                if let Some(section) = ini.section(None::<String>) {
-                    if let Some(flags_string) = section.get("PLATFORM_CXXFLAGS") {
-                        let flags: Vec<String> = flags_string
-                            .split(' ')
-                            .filter_map(|s| {
-                                if !s.is_empty()
-                                    && s != "-DZLIB"
-                                    && s != "-DBZIP2"
-                                    && s != "-DLZ4"
-                                    && s != "-DZSTD"
-                                    && s != "-DSNAPPY"
-                                    && s != "-DROCKSDB_BACKTRACE"
-                                {
-                                    Some(s.to_owned())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-                        return Some(flags);
-                    }
-                }
-            }
-        }
+    if cfg!(target_os = "windows") {
+        return None;
     }
-    None
+    let source = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR")?).join("rocksdb");
+    let output_dir = PathBuf::from(env::var_os("OUT_DIR")?);
+    // Probes write temporary files in their working directory. Keep them out of
+    // watched sources; the upstream version helper needs these relative paths.
+    for file in ["build_tools/version.sh", "include/rocksdb/version.h"] {
+        let destination = output_dir.join(file);
+        fs::create_dir_all(destination.parent()?).ok()?;
+        fs::copy(source.join(file), destination).ok()?;
+    }
+    let output_path = output_dir.join("rocksdb-platform.mk");
+    let mut command = Command::new("bash");
+    command
+        .current_dir(&output_dir)
+        .arg(source.join("build_tools/build_detect_platform"))
+        .arg(&output_path)
+        .env("ROCKSDB_ROOT", &source)
+        // Compression and io-uring libraries are selected by Cargo features.
+        .env("ROCKSDB_USE_IO_URING", "0")
+        .env("ROCKSDB_DISABLE_JEMALLOC", "1")
+        .env("ROCKSDB_DISABLE_TCMALLOC", "1");
+    if cfg!(feature = "static") {
+        command.env("LIB_MODE", "static");
+    }
+    if !cfg!(feature = "march-native") {
+        // Keep the portable baseline; upstream USE_SSE now implies Haswell.
+        command.env("PORTABLE", "1").env_remove("USE_SSE");
+    }
+    if !command.output().ok()?.status.success() {
+        return None;
+    }
+    let output = fs::read_to_string(output_path).ok()?;
+    let flags = output
+        .lines()
+        .find_map(|line| line.strip_prefix("PLATFORM_CXXFLAGS="))?;
+    Some(
+        flags
+            .split_whitespace()
+            .filter(|flag| {
+                !matches!(
+                    *flag,
+                    "-DZLIB" | "-DBZIP2" | "-DLZ4" | "-DZSTD" | "-DSNAPPY" | "-DROCKSDB_BACKTRACE"
+                )
+            })
+            .map(str::to_owned)
+            .collect(),
+    )
 }
 
 fn link(name: &str, bundled: bool) {
@@ -109,6 +103,9 @@ fn bindgen_rocksdb() {
 
 fn build_rocksdb() {
     let target = env::var("TARGET").unwrap();
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap();
+    let io_uring = target_os == "linux" && cfg!(feature = "io-uring");
 
     let mut config = cc::Build::new();
     config.include("rocksdb/include/");
@@ -167,18 +164,13 @@ fn build_rocksdb() {
     config.define("NIOSTATS_CONTEXT", None);
     config.define("NPERF_CONTEXT", None);
 
+    // Use our pinned build metadata instead of the upstream generated source.
     let mut lib_sources = include_str!("rocksdb_lib_sources.txt")
         .trim()
-        .split('\n')
+        .lines()
         .map(str::trim)
-        .collect::<Vec<&'static str>>();
-
-    // We have a pregenerated a version of build_version.cc in the local directory
-    lib_sources = lib_sources
-        .iter()
-        .cloned()
-        .filter(|&file| file != "util/build_version.cc")
-        .collect::<Vec<&'static str>>();
+        .filter(|file| *file != "util/build_version.cc")
+        .collect::<Vec<_>>();
 
     if let Some(flags) = get_flags_from_detect_platform_script() {
         println!("PLATFORM_CXXFLAGS: {:?}", flags);
@@ -200,11 +192,9 @@ fn build_rocksdb() {
                 config.define("HAVE_BMI", None);
             }
 
-            if !target.contains("android") {
-                if is_x86_feature_detected!("pclmulqdq") {
-                    config.define("HAVE_PCLMUL", None);
-                    config.flag_if_supported("-mpclmul");
-                }
+            if !target.contains("android") && is_x86_feature_detected!("pclmulqdq") {
+                config.define("HAVE_PCLMUL", None);
+                config.flag_if_supported("-mpclmul");
             }
         }
         if target.contains("darwin") {
@@ -227,10 +217,6 @@ fn build_rocksdb() {
         config.flag(cxx_standard());
     }
 
-    if target.contains("aarch64") {
-        lib_sources.push("util/crc32c_arm64.cc")
-    }
-
     if target.contains("windows") {
         link("rpcrt4", false);
         link("shlwapi", false);
@@ -249,20 +235,12 @@ fn build_rocksdb() {
             config.define("_WIN32_WINNT", Some("_WIN32_WINNT_VISTA"));
         }
 
-        // Remove POSIX-specific sources
-        lib_sources = lib_sources
-            .iter()
-            .cloned()
-            .filter(|file| {
-                !matches!(
-                    *file,
-                    "port/port_posix.cc"
-                        | "env/env_posix.cc"
-                        | "env/fs_posix.cc"
-                        | "env/io_posix.cc"
-                )
-            })
-            .collect::<Vec<&'static str>>();
+        lib_sources.retain(|file| {
+            !matches!(
+                *file,
+                "port/port_posix.cc" | "env/env_posix.cc" | "env/fs_posix.cc" | "env/io_posix.cc"
+            )
+        });
 
         // Add Windows-specific sources
         lib_sources.extend([
@@ -273,10 +251,6 @@ fn build_rocksdb() {
             "port/win/win_logger.cc",
             "port/win/win_thread.cc",
         ]);
-
-        if cfg!(feature = "jemalloc") {
-            lib_sources.push("port/win/win_jemalloc.cc");
-        }
     }
 
     if target.contains("msvc") {
@@ -296,20 +270,18 @@ fn build_rocksdb() {
     }
 
     config.define("ROCKSDB_SUPPORT_THREAD_LOCAL", None);
-    if target.contains("linux") {
-        if cfg!(feature = "io-uring") {
-            pkg_config::probe_library("liburing")
-                .expect("The io-uring feature was requested but the library is not available");
-            config.define("ROCKSDB_IOURING_PRESENT", Some("1"));
-        }
+    if io_uring {
+        config.include(build_liburing());
+        config.include("liburing/src/include");
+        config.define("ROCKSDB_IOURING_PRESENT", Some("1"));
     }
 
-    if cfg!(feature = "jemalloc") && NO_JEMALLOC_TARGETS.iter().all(|i| !target.contains(i)) {
+    if target_os == "linux" && target_env == "gnu" && cfg!(feature = "jemalloc") {
+        let root = env::var_os("DEP_JEMALLOC_ROOT")
+            .expect("jemalloc headers must come from the linked tikv-jemalloc-sys");
+        config.include(Path::new(&root).join("include"));
         config.define("ROCKSDB_JEMALLOC", Some("1"));
         config.define("JEMALLOC_NO_DEMANGLE", Some("1"));
-        if let Some(jemalloc_root) = env::var_os("DEP_JEMALLOC_ROOT") {
-            config.include(Path::new(&jemalloc_root).join("include"));
-        }
     }
 
     config.flag_if_supported("-std=c++20");
@@ -328,6 +300,66 @@ fn build_rocksdb() {
     config.cpp(true);
 
     config.compile("librocksdb.a");
+    if io_uring {
+        // Static dependencies must follow the archive that references them.
+        println!("cargo:rustc-link-lib=static=uring");
+    }
+}
+
+fn build_liburing() -> PathBuf {
+    println!("cargo:rerun-if-changed=liburing/");
+    let source = Path::new("liburing").canonicalize().unwrap();
+    let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("liburing");
+    fs::create_dir_all(&output).unwrap();
+
+    // Use upstream's out-of-source build and Cargo's target tools. A static
+    // library keeps io-uring optional at runtime, without a liburing.so dependency.
+    let build = cc::Build::new();
+    let mut configure = Command::new("sh");
+    configure
+        .arg(source.join("configure"))
+        .arg("--use-libc")
+        .current_dir(&output)
+        .env("CFLAGS", build.get_compiler().cflags_env());
+    for (variable, tool) in [
+        ("CC", build.get_compiler()),
+        ("CXX", cc::Build::new().cpp(true).get_compiler()),
+    ] {
+        let wrapper = tool.cc_env();
+        configure.env(
+            variable,
+            if wrapper.is_empty() {
+                tool.path().as_os_str()
+            } else {
+                &wrapper
+            },
+        );
+    }
+    assert!(
+        configure
+            .status()
+            .expect("configure bundled liburing")
+            .success(),
+        "liburing configuration failed; see its config.log in OUT_DIR"
+    );
+    assert!(
+        Command::new("make")
+            .arg("-C")
+            .arg(output.join("src"))
+            .arg("liburing.a")
+            .arg(format!("-j{}", env::var("NUM_JOBS").unwrap()))
+            .env("AR", build.get_archiver().get_program())
+            .env("RANLIB", build.get_ranlib().get_program())
+            .status()
+            .expect("build bundled liburing")
+            .success(),
+        "liburing build failed"
+    );
+    println!(
+        "cargo:rustc-link-search=native={}",
+        output.join("src").display()
+    );
+    output.join("src/include")
 }
 
 fn build_snappy() {
@@ -465,15 +497,15 @@ fn build_bzip2() {
 }
 
 fn try_to_find_and_link_lib(lib_name: &str) -> bool {
-    if let Ok(v) = env::var(&format!("{}_COMPILE", lib_name)) {
-        if v.to_lowercase() == "true" || v == "1" {
-            return false;
-        }
+    if let Ok(value) = env::var(format!("{lib_name}_COMPILE"))
+        && (value.eq_ignore_ascii_case("true") || value == "1")
+    {
+        return false;
     }
 
-    if let Ok(lib_dir) = env::var(&format!("{}_LIB_DIR", lib_name)) {
+    if let Ok(lib_dir) = env::var(format!("{lib_name}_LIB_DIR")) {
         println!("cargo:rustc-link-search=native={}", lib_dir);
-        let mode = match env::var_os(&format!("{}_STATIC", lib_name)) {
+        let mode = match env::var_os(format!("{lib_name}_STATIC")) {
             Some(_) => "static",
             None => "dylib",
         };
@@ -497,6 +529,9 @@ fn main() {
     bindgen_rocksdb();
 
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build_version.cc");
+    println!("cargo:rerun-if-changed=rocksdb_lib_sources.txt");
+    println!("cargo:rerun-if-changed=snappy-stubs-public.h");
     println!("cargo:rerun-if-changed=rocksdb/");
     println!("cargo:rerun-if-changed=patches/");
     fail_on_empty_directory("rocksdb");

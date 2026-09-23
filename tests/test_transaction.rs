@@ -43,6 +43,7 @@ pub fn test_transaction() {
         assert!(!iter.valid());
         assert_eq!(iter.key(), None);
         assert_eq!(iter.value(), None);
+        drop(iter);
 
         let trans3 = db.transaction_default();
 

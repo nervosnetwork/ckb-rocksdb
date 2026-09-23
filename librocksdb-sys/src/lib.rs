@@ -20,6 +20,9 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 extern crate libc;
 
+#[cfg(all(feature = "jemalloc", target_os = "linux", target_env = "gnu"))]
+extern crate tikv_jemalloc_sys;
+
 use libc::c_int;
 
 #[cfg(test)]

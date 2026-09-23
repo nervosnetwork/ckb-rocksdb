@@ -14,7 +14,7 @@ pub fn bench(c: &mut Criterion) {
                 let mut opts = Options::default();
                 opts.create_if_missing(true);
 
-                let db = OptimisticTransactionDB::open_default(&path).unwrap();
+                let db = std::sync::Arc::new(OptimisticTransactionDB::open_default(&path).unwrap());
 
                 for i in 0..*size {
                     db.put(&i.to_le_bytes()[..], &BIG_VALUE[..]).unwrap();
@@ -45,7 +45,8 @@ pub fn bench(c: &mut Criterion) {
                     let mut opts = Options::default();
                     opts.create_if_missing(true);
 
-                    let db = OptimisticTransactionDB::open_default(&path).unwrap();
+                    let db =
+                        std::sync::Arc::new(OptimisticTransactionDB::open_default(&path).unwrap());
 
                     for i in 0..*size {
                         db.put(&i.to_le_bytes()[..], &BIG_VALUE[..]).unwrap();
