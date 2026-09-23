@@ -66,6 +66,16 @@ The jemalloc version is intentionally shared with CKB. Upgrading that optional
 dependency to another release series requires coordinating CKB's allocator and
 memory-tracking dependencies to avoid multiple native allocator implementations.
 
+## Secondary reads
+
+`SecondaryDB::try_catch_up_with_primary()` follows the upstream RocksDB
+11.8.1 behavior. A successful catch-up does not guarantee fresh reads after
+the primary flushes: a previously replayed WAL value can shadow a newer SST
+value. A newly opened Secondary sees the newer value in the reproduced case.
+See upstream issues [#14444](https://github.com/facebook/rocksdb/issues/14444)
+and [#15051](https://github.com/facebook/rocksdb/issues/15051). Applications
+that require current reads must account for this limitation.
+
 ## Versioning and release verification
 
 ### Migrating transaction and callback code to 1.0

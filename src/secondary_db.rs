@@ -41,6 +41,10 @@ impl SecondaryDB {
         self.path.as_path()
     }
 
+    /// Apply available MANIFEST and WAL changes from the primary.
+    ///
+    /// A successful call can still return stale values after the primary
+    /// flushes a value already replayed from WAL. See RocksDB issue #14444.
     pub fn try_catch_up_with_primary(&self) -> Result<(), Error> {
         unsafe { ffi_try!(ffi::rocksdb_try_catch_up_with_primary(self.inner,)) };
         Ok(())
