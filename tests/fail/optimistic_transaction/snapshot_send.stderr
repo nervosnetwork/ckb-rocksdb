@@ -1,0 +1,63 @@
+error[E0277]: `*const rocksdb_snapshot_t` cannot be sent between threads safely
+  --> tests/fail/optimistic_transaction/snapshot_send.rs:11:21
+   |
+11 |         scope.spawn(move || drop(snapshot));
+   |               ----- -------^^^^^^^^^^^^^^^
+   |               |     |
+   |               |     `*const rocksdb_snapshot_t` cannot be sent between threads safely
+   |               |     within this `{closure@$DIR/tests/fail/optimistic_transaction/snapshot_send.rs:11:21: 11:28}`
+   |               required by a bound introduced by this call
+   |
+   = help: within `{closure@$DIR/tests/fail/optimistic_transaction/snapshot_send.rs:11:21: 11:28}`, the trait `Send` is not implemented for `*const rocksdb_snapshot_t`
+note: required because it appears within the type `OptimisticTransactionSnapshot<'_>`
+  --> src/optimistic_transaction.rs
+   |
+   | pub struct OptimisticTransactionSnapshot<'a> {
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it's used within this closure
+  --> tests/fail/optimistic_transaction/snapshot_send.rs:11:21
+   |
+11 |         scope.spawn(move || drop(snapshot));
+   |                     ^^^^^^^
+note: required by a bound in `Scope::<'scope, 'env>::spawn`
+  --> $RUST/std/src/thread/scoped.rs
+   |
+   |     pub fn spawn<F, T>(&'scope self, f: F) -> ScopedJoinHandle<'scope, T>
+   |            ----- required by a bound in this associated function
+   |     where
+   |         F: FnOnce() -> T + Send + 'scope,
+   |                            ^^^^ required by this bound in `Scope::<'scope, 'env>::spawn`
+
+error[E0277]: `*mut rocksdb_transaction_t` cannot be shared between threads safely
+  --> tests/fail/optimistic_transaction/snapshot_send.rs:11:21
+   |
+11 |         scope.spawn(move || drop(snapshot));
+   |               ----- ^^^^^^^^^^^^^^^^^^^^^^ `*mut rocksdb_transaction_t` cannot be shared between threads safely
+   |               |
+   |               required by a bound introduced by this call
+   |
+   = help: within `OptimisticTransaction<'_>`, the trait `Sync` is not implemented for `*mut rocksdb_transaction_t`
+note: required because it appears within the type `OptimisticTransaction<'_>`
+  --> src/optimistic_transaction.rs
+   |
+   | pub struct OptimisticTransaction<'db> {
+   |            ^^^^^^^^^^^^^^^^^^^^^
+   = note: required for `&OptimisticTransaction<'_>` to implement `Send`
+note: required because it appears within the type `OptimisticTransactionSnapshot<'_>`
+  --> src/optimistic_transaction.rs
+   |
+   | pub struct OptimisticTransactionSnapshot<'a> {
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it's used within this closure
+  --> tests/fail/optimistic_transaction/snapshot_send.rs:11:21
+   |
+11 |         scope.spawn(move || drop(snapshot));
+   |                     ^^^^^^^
+note: required by a bound in `Scope::<'scope, 'env>::spawn`
+  --> $RUST/std/src/thread/scoped.rs
+   |
+   |     pub fn spawn<F, T>(&'scope self, f: F) -> ScopedJoinHandle<'scope, T>
+   |            ----- required by a bound in this associated function
+   |     where
+   |         F: FnOnce() -> T + Send + 'scope,
+   |                            ^^^^ required by this bound in `Scope::<'scope, 'env>::spawn`

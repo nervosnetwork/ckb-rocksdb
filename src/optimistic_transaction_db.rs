@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::Arc;
 
 /// A optimistic transaction database.
 pub struct OptimisticTransactionDB {
@@ -124,22 +125,42 @@ impl OptimisticTransactionDB {
         &self,
         write_options: &WriteOptions,
         tx_options: &OptimisticTransactionOptions,
-    ) -> OptimisticTransaction {
+    ) -> OptimisticTransaction<'_> {
+        OptimisticTransaction::new(self.begin_raw(write_options, tx_options))
+    }
+
+    pub fn transaction_default(&self) -> OptimisticTransaction<'_> {
+        let write_options = WriteOptions::default();
+        let transaction_options = OptimisticTransactionOptions::default();
+        self.transaction(&write_options, &transaction_options)
+    }
+
+    /// Begins a transaction that keeps its own reference to the database,
+    /// so it can be stored next to the `Arc` instead of borrowing from it.
+    pub fn transaction_owned(
+        self: &Arc<Self>,
+        write_options: &WriteOptions,
+        tx_options: &OptimisticTransactionOptions,
+    ) -> OptimisticTransaction<'static> {
+        OptimisticTransaction::with_owner(
+            self.begin_raw(write_options, tx_options),
+            Arc::clone(self),
+        )
+    }
+
+    fn begin_raw(
+        &self,
+        write_options: &WriteOptions,
+        tx_options: &OptimisticTransactionOptions,
+    ) -> *mut ffi::rocksdb_transaction_t {
         unsafe {
-            let inner = ffi::rocksdb_optimistictransaction_begin(
+            ffi::rocksdb_optimistictransaction_begin(
                 self.inner,
                 write_options.handle(),
                 tx_options.inner,
                 ptr::null_mut(),
-            );
-            OptimisticTransaction::new(inner)
+            )
         }
-    }
-
-    pub fn transaction_default(&self) -> OptimisticTransaction {
-        let write_options = WriteOptions::default();
-        let transaction_options = OptimisticTransactionOptions::default();
-        self.transaction(&write_options, &transaction_options)
     }
 }
 

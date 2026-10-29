@@ -299,24 +299,6 @@ pub fn test_optimistic_transaction_merge() {
     }
 }
 
-#[derive(Clone)]
-struct TransWrapper {
-    txn: Arc<OptimisticTransaction>,
-}
-
-impl TransWrapper {
-    fn new(txn: OptimisticTransaction) -> Self {
-        Self { txn: Arc::new(txn) }
-    }
-
-    fn check<K>(&self, key: K, value: &str) -> bool
-    where
-        K: AsRef<[u8]>,
-    {
-        self.txn.get(key).unwrap().unwrap().to_utf8().unwrap() == value
-    }
-}
-
 #[test]
 fn sync_transaction_test() {
     let n = TemporaryDBPath::new();
@@ -327,17 +309,62 @@ fn sync_transaction_test() {
         assert!(txn.put(b"k1", b"v1").is_ok());
         assert!(txn.put(b"k2", b"v2").is_ok());
 
-        let wrapper = TransWrapper::new(txn);
-
-        let wrapper_1 = wrapper.clone();
-        let handler_1 = thread::spawn(move || wrapper_1.check("k1", "v1"));
-
-        let wrapper_2 = wrapper;
-        let handler_2 = thread::spawn(move || wrapper_2.check("k2", "v2"));
-
-        assert!(handler_1.join().unwrap());
-        assert!(handler_2.join().unwrap());
+        thread::scope(|scope| {
+            let handler = scope.spawn(move || {
+                assert_eq!(txn.get(b"k1").unwrap().unwrap().to_utf8().unwrap(), "v1");
+                assert_eq!(txn.get(b"k2").unwrap().unwrap().to_utf8().unwrap(), "v2");
+            });
+            handler.join().unwrap();
+        });
     }
+}
+
+struct OwnedTransaction {
+    db: Arc<OptimisticTransactionDB>,
+    txn: OptimisticTransaction<'static>,
+}
+
+#[test]
+fn owned_transaction_keeps_db_alive() {
+    let n = TemporaryDBPath::new();
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+        let db = Arc::new(OptimisticTransactionDB::open_cf(&opts, &n, ["cf"]).unwrap());
+        let mut txn_opts = OptimisticTransactionOptions::default();
+        txn_opts.set_snapshot(true);
+        let owned = OwnedTransaction {
+            db: Arc::clone(&db),
+            txn: db.transaction_owned(&WriteOptions::default(), &txn_opts),
+        };
+        drop(db);
+
+        {
+            let cf = owned.db.cf_handle("cf").unwrap();
+            owned.txn.put_cf(cf, b"k1", b"v1").unwrap();
+            assert_eq!(
+                &*owned.txn.get_pinned_cf(cf, b"k1").unwrap().unwrap(),
+                b"v1"
+            );
+            let snapshot = owned.txn.snapshot();
+            assert_eq!(&*snapshot.get_cf(cf, b"k1").unwrap().unwrap(), b"v1");
+        }
+        owned.txn.put(b"k0", b"v0").unwrap();
+
+        let OwnedTransaction { db, txn } = owned;
+        drop(db);
+        txn.commit().unwrap();
+        assert_eq!(&*txn.get(b"k0").unwrap().unwrap(), b"v0");
+    }
+}
+
+// FIXME: windows
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn test_optimistic_transaction_misuse_fails_to_compile() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/fail/optimistic_transaction/*.rs");
 }
 
 #[test]
