@@ -14,6 +14,7 @@
 //
 
 use crate::ops::Iterate;
+use crate::Error;
 use libc::{c_char, c_uchar, size_t};
 use std::marker::PhantomData;
 use std::slice;
@@ -136,8 +137,45 @@ pub enum IteratorMode<'a> {
 
 impl<'a> DBRawIterator<'a> {
     /// Returns true if the iterator is valid.
+    ///
+    /// A `false` result does not necessarily mean the iterator reached the
+    /// end of the data: RocksDB reports read errors out-of-band by
+    /// invalidating the iterator. Call [`Self::status`] to distinguish a
+    /// normal end of iteration from an I/O or corruption error.
     pub fn valid(&self) -> bool {
         unsafe { ffi::rocksdb_iter_valid(self.inner) != 0 }
+    }
+
+    /// Returns the iterator's current status.
+    ///
+    /// RocksDB iterators do not surface read errors through the data they
+    /// yield; an error instead makes [`Self::valid`] return `false`. This
+    /// method reports such an error, and should be called after iteration
+    /// ends to detect silent truncation.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ckb_rocksdb::prelude::*;
+    /// # use ckb_rocksdb::TemporaryDBPath;
+    ///
+    /// # let path = TemporaryDBPath::new();
+    /// # {
+    /// let db = DB::open_default(&path).unwrap();
+    /// let mut iter = db.raw_iterator();
+    /// iter.seek_to_first();
+    /// while iter.valid() {
+    ///     println!("{:?} {:?}", iter.key(), iter.value());
+    ///     iter.next();
+    /// }
+    /// iter.status().unwrap();
+    /// # }
+    /// ```
+    pub fn status(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_iter_get_error(self.inner));
+        }
+        Ok(())
     }
 
     /// Seeks to the first key in the database.
@@ -389,6 +427,16 @@ impl<'a> DBIterator<'a> {
 
     pub fn valid(&self) -> bool {
         self.raw.valid()
+    }
+
+    /// Returns the underlying iterator's status.
+    ///
+    /// The standard [`Iterator`] implementation stops yielding items once the
+    /// iterator becomes invalid, whether that is due to reaching the end of
+    /// the data or to a read error. Call this method after the iteration
+    /// completes to detect errors that would otherwise be silently swallowed.
+    pub fn status(&self) -> Result<(), Error> {
+        self.raw.status()
     }
 }
 

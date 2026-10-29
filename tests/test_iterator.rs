@@ -14,7 +14,9 @@
 //
 extern crate ckb_rocksdb as rocksdb;
 
-use crate::rocksdb::{prelude::*, Direction, IteratorMode, MemtableFactory, TemporaryDBPath};
+use crate::rocksdb::{
+    ffi, prelude::*, Direction, Handle, IteratorMode, MemtableFactory, TemporaryDBPath,
+};
 
 fn cba(input: &[u8]) -> Box<[u8]> {
     input.to_vec().into_boxed_slice()
@@ -302,4 +304,43 @@ fn test_full_iterator() {
 fn test_iterator_outlive_db() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/fail/iterator/*.rs");
+}
+
+#[test]
+fn test_status_after_iteration() {
+    let n = TemporaryDBPath::new();
+    {
+        let db = DB::open_default(&n).unwrap();
+        db.put(b"k1", b"v1").unwrap();
+        db.put(b"k2", b"v2").unwrap();
+
+        let mut iter = db.iterator(IteratorMode::Start);
+        while iter.next().is_some() {}
+        assert!(iter.status().is_ok());
+
+        let mut iter = db.iterator(IteratorMode::End);
+        while iter.next().is_some() {}
+        assert!(iter.status().is_ok());
+    }
+}
+
+#[test]
+fn test_status_reports_iterator_error() {
+    let n = TemporaryDBPath::new();
+    {
+        let db = DB::open_default(&n).unwrap();
+        let options = ReadOptions::default();
+        // kPersistedTier is not supported by iterators; it produces a real
+        // iterator error, so status() must report it instead of looking like
+        // a normal end of iteration.
+        unsafe { ffi::rocksdb_readoptions_set_read_tier(options.handle(), 2) };
+        let mut iter = db.iterator_opt(IteratorMode::Start, &options);
+        let _ = iter.next();
+        let status = iter.status();
+        assert!(
+            status.is_err(),
+            "expected an iterator error, got {:?}",
+            status
+        );
+    }
 }
