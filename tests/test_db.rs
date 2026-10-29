@@ -14,6 +14,7 @@
 
 extern crate ckb_rocksdb as rocksdb;
 use libc::size_t;
+use std::cell::Cell;
 
 use crate::rocksdb::{IteratorMode, TemporaryDBPath, WriteBatch, prelude::*};
 
@@ -361,6 +362,55 @@ fn multi_get_cf() {
         assert_eq!(values[0], None);
         assert_eq!(values[1], Some(b"v1".to_vec()));
         assert_eq!(values[2], Some(b"v2".to_vec()));
+    }
+}
+
+/// A key whose `as_ref` returns a longer slice after the first call.
+struct ShiftingKey(Cell<bool>);
+
+impl ShiftingKey {
+    fn new() -> Self {
+        Self(Cell::new(false))
+    }
+}
+
+impl AsRef<[u8]> for ShiftingKey {
+    fn as_ref(&self) -> &[u8] {
+        if self.0.replace(true) {
+            b"k1 but much longer"
+        } else {
+            b"k1"
+        }
+    }
+}
+
+#[test]
+fn multi_get_reads_each_key_once() {
+    let tmp = TemporaryDBPath::new();
+    let path = tmp.join("_rust_rocksdb_multi_get_reads_each_key_once");
+
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+        let db = DB::open_cf(&opts, path, ["cf"]).unwrap();
+        let cf = db.cf_handle("cf").unwrap();
+        db.put(b"k1", b"v1").unwrap();
+        db.put_cf(cf, b"k1", b"v1").unwrap();
+
+        let values: Vec<_> = db
+            .multi_get([ShiftingKey::new()])
+            .into_iter()
+            .map(|v| v.unwrap().map(|v| v.to_vec()))
+            .collect();
+        assert_eq!(values, vec![Some(b"v1".to_vec())]);
+
+        let values: Vec<_> = db
+            .multi_get_cf([(cf, ShiftingKey::new())])
+            .into_iter()
+            .map(|v| v.unwrap().map(|v| v.to_vec()))
+            .collect();
+        assert_eq!(values, vec![Some(b"v1".to_vec())]);
     }
 }
 

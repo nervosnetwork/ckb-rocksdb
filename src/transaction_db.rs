@@ -358,7 +358,10 @@ impl MultiGet<ReadOptions> for TransactionDB {
 
         let (keys, keys_sizes): (Vec<Box<[u8]>>, Vec<_>) = keys
             .into_iter()
-            .map(|k| (Box::from(k.as_ref()), k.as_ref().len()))
+            .map(|k| {
+                let key = k.as_ref();
+                (Box::from(key), key.len())
+            })
             .unzip();
         let ptr_keys: Vec<_> = keys.iter().map(|k| k.as_ptr() as *const c_char).collect();
 
@@ -406,7 +409,10 @@ impl MultiGetCF<ReadOptions> for TransactionDB {
         };
         let (cfs_and_keys, keys_sizes): (Vec<CFAndKey>, Vec<_>) = keys
             .into_iter()
-            .map(|(cf, key)| ((cf, Box::from(key.as_ref())), key.as_ref().len()))
+            .map(|(cf, key)| {
+                let key = key.as_ref();
+                ((cf, Box::from(key)), key.len())
+            })
             .unzip();
         let ptr_keys: Vec<_> = cfs_and_keys
             .iter()
