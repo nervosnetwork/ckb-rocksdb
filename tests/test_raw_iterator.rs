@@ -164,3 +164,22 @@ fn iterator_test_past_end() {
         assert!(iter.next().is_none());
     }
 }
+
+#[test]
+fn test_raw_iterator_status_ok() {
+    let n = TemporaryDBPath::new();
+    {
+        let db = DB::open_default(&n).unwrap();
+        db.put(b"k1", b"v1").unwrap();
+        db.put(b"k2", b"v2").unwrap();
+
+        let mut iter = db.raw_iterator();
+        iter.seek_to_first();
+        assert!(iter.status().is_ok());
+
+        while iter.valid() {
+            iter.next();
+        }
+        assert!(iter.status().is_ok());
+    }
+}

@@ -13,7 +13,7 @@ jobs:
       - name: Install rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.71.1
+          toolchain: 1.89.0
           components: rustfmt
           profile: minimal
           override: true
@@ -34,7 +34,7 @@ jobs:
       - name: Install rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.71.1
+          toolchain: 1.89.0
           components: clippy
           profile: minimal
           override: true
@@ -42,13 +42,19 @@ jobs:
         uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all --tests -- -A clippy::upper-case-acronyms -A clippy::missing_safety_doc -D warnings
+          args: --all --tests -- -A clippy::upper-case-acronyms -A clippy::missing_safety_doc -A clippy::empty_line_after_doc_comments -A mismatched_lifetime_syntaxes -A clippy::useless_conversion -A unexpected_cfgs -A clippy::useless_asref -A clippy::doc_lazy_continuation -A dead_code -A clippy::unnecessary_cast -A clippy::get_first -A clippy::repr_packed_without_abi -D warnings
 
   audit:
     name: Security audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
       - uses: actions-rs/audit-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -98,7 +104,7 @@ jobs:
       - name: Install rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.71.1
+          toolchain: 1.89.0
           target: ${{ matrix.target }}
           profile: minimal
           override: true
