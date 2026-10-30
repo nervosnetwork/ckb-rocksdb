@@ -12,7 +12,6 @@ use crate::ffi;
 use crate::ffi_util::to_cpath;
 use libc::c_uchar;
 use std::collections::BTreeMap;
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
@@ -222,12 +221,9 @@ impl Handle<ffi::rocksdb_t> for OptimisticTransactionDB {
 
 impl Iterate for OptimisticTransactionDB {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
-        unsafe {
-            DBRawIterator {
-                inner: ffi::rocksdb_create_iterator(self.base_db, readopts.handle()),
-                db: PhantomData,
-            }
-        }
+        DBRawIterator::new(readopts, |opts| unsafe {
+            ffi::rocksdb_create_iterator(self.base_db, opts)
+        })
     }
 }
 
@@ -237,16 +233,9 @@ impl IterateCF for OptimisticTransactionDB {
         cf_handle: &ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
-        unsafe {
-            Ok(DBRawIterator {
-                inner: ffi::rocksdb_create_iterator_cf(
-                    self.base_db,
-                    readopts.handle(),
-                    cf_handle.inner,
-                ),
-                db: PhantomData,
-            })
-        }
+        Ok(DBRawIterator::new(readopts, |opts| unsafe {
+            ffi::rocksdb_create_iterator_cf(self.base_db, opts, cf_handle.inner)
+        }))
     }
 }
 

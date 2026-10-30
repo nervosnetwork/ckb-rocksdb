@@ -12,7 +12,6 @@ use crate::{
 use crate::ffi;
 use libc::{c_char, c_uchar, size_t};
 use std::collections::BTreeMap;
-use std::marker::PhantomData;
 use std::path::Path;
 use std::path::PathBuf;
 use std::ptr;
@@ -129,12 +128,9 @@ impl TransactionBegin for TransactionDB {
 
 impl Iterate for TransactionDB {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
-        unsafe {
-            DBRawIterator {
-                inner: ffi::rocksdb_transactiondb_create_iterator(self.inner, readopts.handle()),
-                db: PhantomData,
-            }
-        }
+        DBRawIterator::new(readopts, |opts| unsafe {
+            ffi::rocksdb_transactiondb_create_iterator(self.inner, opts)
+        })
     }
 }
 
@@ -144,16 +140,9 @@ impl IterateCF for TransactionDB {
         cf_handle: &ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
-        unsafe {
-            Ok(DBRawIterator {
-                inner: ffi::rocksdb_transactiondb_create_iterator_cf(
-                    self.inner,
-                    readopts.handle(),
-                    cf_handle.handle(),
-                ),
-                db: PhantomData,
-            })
-        }
+        Ok(DBRawIterator::new(readopts, |opts| unsafe {
+            ffi::rocksdb_transactiondb_create_iterator_cf(self.inner, opts, cf_handle.handle())
+        }))
     }
 }
 

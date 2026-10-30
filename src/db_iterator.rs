@@ -14,7 +14,9 @@
 //
 
 use crate::Error;
+use crate::handle::Handle;
 use crate::ops::Iterate;
+use crate::{ReadOptions, ffi};
 use libc::{c_char, c_uchar, size_t};
 use std::marker::PhantomData;
 use std::slice;
@@ -76,6 +78,22 @@ unsafe impl Sync for DBRawIterator<'_> {}
 pub struct DBRawIterator<'a> {
     pub(crate) inner: *mut ffi::rocksdb_iterator_t,
     pub(crate) db: PhantomData<&'a dyn Iterate>,
+    _readopts: ReadOptions,
+}
+
+impl<'a> DBRawIterator<'a> {
+    pub(crate) fn new(
+        readopts: &ReadOptions,
+        create: impl FnOnce(*mut ffi::rocksdb_readoptions_t) -> *mut ffi::rocksdb_iterator_t,
+    ) -> Self {
+        let readopts = readopts.clone();
+        let inner = create(readopts.handle());
+        Self {
+            inner,
+            db: PhantomData,
+            _readopts: readopts,
+        }
+    }
 }
 
 /// An iterator over a database or column family, with specifiable

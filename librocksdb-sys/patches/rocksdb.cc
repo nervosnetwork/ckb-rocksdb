@@ -6,6 +6,8 @@ using rocksdb::Cache;
 using rocksdb::ColumnFamilyDescriptor;
 using rocksdb::Env;
 using rocksdb::Options;
+using rocksdb::ReadOptions;
+using rocksdb::Slice;
 using rocksdb::Status;
 
 extern "C" {
@@ -19,6 +21,13 @@ extern "C" {
     };
     struct rocksdb_options_t {
         Options rep;
+    };
+    struct rocksdb_readoptions_t {
+        ReadOptions rep;
+        Slice upper_bound;
+        Slice lower_bound;
+        Slice timestamp;
+        Slice iter_start_ts;
     };
 
     // New structs
@@ -39,6 +48,25 @@ extern "C" {
     rocksdb_options_t* rocksdb_options_clone(rocksdb_options_t* options) {
         rocksdb_options_t* o = new rocksdb_options_t;
         o->rep = Options(options->rep);
+        return o;
+    }
+
+    rocksdb_readoptions_t* rocksdb_readoptions_clone(const rocksdb_readoptions_t* options) {
+        rocksdb_readoptions_t* o = new rocksdb_readoptions_t(*options);
+        // ReadOptions points at the Slices stored next to it, so the copy has
+        // to point at its own Slices instead of the source's.
+        if (options->rep.iterate_upper_bound != nullptr) {
+            o->rep.iterate_upper_bound = &o->upper_bound;
+        }
+        if (options->rep.iterate_lower_bound != nullptr) {
+            o->rep.iterate_lower_bound = &o->lower_bound;
+        }
+        if (options->rep.timestamp != nullptr) {
+            o->rep.timestamp = &o->timestamp;
+        }
+        if (options->rep.iter_start_ts != nullptr) {
+            o->rep.iter_start_ts = &o->iter_start_ts;
+        }
         return o;
     }
 

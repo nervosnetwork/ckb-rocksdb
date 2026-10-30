@@ -20,6 +20,9 @@ extern ROCKSDB_LIBRARY_API
     rocksdb_options_t* rocksdb_options_clone(rocksdb_options_t* options);
 
 extern ROCKSDB_LIBRARY_API
+    rocksdb_readoptions_t* rocksdb_readoptions_clone(const rocksdb_readoptions_t* options);
+
+extern ROCKSDB_LIBRARY_API
     rocksdb_column_family_descriptors_t* rocksdb_column_family_descriptors_create();
 
 extern ROCKSDB_LIBRARY_API

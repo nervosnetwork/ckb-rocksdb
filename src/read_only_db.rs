@@ -27,7 +27,6 @@ use crate::{
 use libc::c_uchar;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 pub struct ReadOnlyDB {
@@ -111,12 +110,9 @@ impl Handle<ffi::rocksdb_t> for ReadOnlyDB {
 
 impl ops::Iterate for ReadOnlyDB {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
-        unsafe {
-            DBRawIterator {
-                inner: ffi::rocksdb_create_iterator(self.inner, readopts.handle()),
-                db: PhantomData,
-            }
-        }
+        DBRawIterator::new(readopts, |opts| unsafe {
+            ffi::rocksdb_create_iterator(self.inner, opts)
+        })
     }
 }
 
@@ -126,16 +122,9 @@ impl ops::IterateCF for ReadOnlyDB {
         cf_handle: &ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
-        unsafe {
-            Ok(DBRawIterator {
-                inner: ffi::rocksdb_create_iterator_cf(
-                    self.inner,
-                    readopts.handle(),
-                    cf_handle.inner,
-                ),
-                db: PhantomData,
-            })
-        }
+        Ok(DBRawIterator::new(readopts, |opts| unsafe {
+            ffi::rocksdb_create_iterator_cf(self.inner, opts, cf_handle.inner)
+        }))
     }
 }
 

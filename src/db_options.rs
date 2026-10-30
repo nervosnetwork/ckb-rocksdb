@@ -3181,7 +3181,7 @@ impl ReadOptions {
         self.option_set_iterate_lower_bound = Some(key.as_ref().to_vec());
         let key = self.option_set_iterate_lower_bound.as_ref().unwrap();
         unsafe {
-            ffi::rocksdb_readoptions_set_iterate_upper_bound(
+            ffi::rocksdb_readoptions_set_iterate_lower_bound(
                 self.inner,
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
@@ -3289,24 +3289,21 @@ impl Default for ReadOptions {
 
 impl Clone for ReadOptions {
     fn clone(&self) -> ReadOptions {
-        let mut ops = ReadOptions::default();
-        if let Some(fill_cache) = self.option_fill_cache {
-            ops.fill_cache(fill_cache);
+        let mut ops = ReadOptions {
+            option_fill_cache: self.option_fill_cache,
+            option_set_iterate_upper_bound: None,
+            option_set_iterate_lower_bound: None,
+            option_set_prefix_same_as_start: self.option_set_prefix_same_as_start,
+            option_set_total_order_seek: self.option_set_total_order_seek,
+            option_set_readahead_size: self.option_set_readahead_size,
+            inner: unsafe { ffi::rocksdb_readoptions_clone(self.inner) },
         };
+        // The copied bounds still point into self's buffers until they are set again.
         if let Some(set_iterate_upper_bound) = &self.option_set_iterate_upper_bound {
             ops.set_iterate_upper_bound(set_iterate_upper_bound);
         };
         if let Some(set_iterate_lower_bound) = &self.option_set_iterate_lower_bound {
             ops.set_iterate_lower_bound(set_iterate_lower_bound);
-        };
-        if let Some(set_prefix_same_as_start) = self.option_set_prefix_same_as_start {
-            ops.set_prefix_same_as_start(set_prefix_same_as_start);
-        };
-        if let Some(set_total_order_seek) = self.option_set_total_order_seek {
-            ops.set_total_order_seek(set_total_order_seek);
-        };
-        if let Some(set_readahead_size) = self.option_set_readahead_size {
-            ops.set_readahead_size(set_readahead_size)
         };
         ops
     }

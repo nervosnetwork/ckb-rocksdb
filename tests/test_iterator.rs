@@ -298,6 +298,39 @@ fn test_full_iterator() {
     }
 }
 
+#[test]
+fn iterator_keeps_upper_bound_after_readopts_drop() {
+    let path = TemporaryDBPath::new();
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    let db = DB::open(&opts, &path).unwrap();
+    db.put(b"a", b"1").unwrap();
+    db.put(b"b", b"2").unwrap();
+    db.put(b"c", b"3").unwrap();
+    db.put(b"d", b"4").unwrap();
+
+    let iter = {
+        let mut readopts = ReadOptions::default();
+        readopts.set_iterate_lower_bound(b"b");
+        readopts.set_iterate_upper_bound(b"d");
+        db.iterator_opt(IteratorMode::Start, &readopts)
+    };
+
+    let keys: Vec<_> = iter.map(|(key, _)| key).collect();
+    assert_eq!(keys, vec![cba(b"b"), cba(b"c")]);
+
+    let snapshot = db.snapshot();
+    let snap_iter = {
+        let mut readopts = ReadOptions::default();
+        readopts.set_iterate_lower_bound(b"b");
+        readopts.set_iterate_upper_bound(b"d");
+        snapshot.iterator_opt(IteratorMode::Start, &readopts)
+    };
+
+    let snap_keys: Vec<_> = snap_iter.map(|(key, _)| key).collect();
+    assert_eq!(snap_keys, vec![cba(b"b"), cba(b"c")]);
+}
+
 // FIXME: windows
 #[cfg(not(target_os = "windows"))]
 #[test]

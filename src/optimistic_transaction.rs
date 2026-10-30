@@ -5,7 +5,6 @@ use crate::{
     ops::*,
 };
 use libc::{c_char, c_uchar, c_void, size_t};
-use std::marker::PhantomData;
 use std::ptr;
 
 pub struct OptimisticTransaction {
@@ -302,12 +301,9 @@ impl MultiGetCF<ReadOptions> for OptimisticTransaction {
 
 impl Iterate for OptimisticTransaction {
     fn get_raw_iter<'a: 'b, 'b>(&'a self, readopts: &ReadOptions) -> DBRawIterator<'b> {
-        unsafe {
-            DBRawIterator {
-                inner: ffi::rocksdb_transaction_create_iterator(self.inner, readopts.handle()),
-                db: PhantomData,
-            }
-        }
+        DBRawIterator::new(readopts, |opts| unsafe {
+            ffi::rocksdb_transaction_create_iterator(self.inner, opts)
+        })
     }
 }
 
@@ -317,16 +313,9 @@ impl IterateCF for OptimisticTransaction {
         cf_handle: &ColumnFamily,
         readopts: &ReadOptions,
     ) -> Result<DBRawIterator<'b>, Error> {
-        unsafe {
-            Ok(DBRawIterator {
-                inner: ffi::rocksdb_transaction_create_iterator_cf(
-                    self.inner,
-                    readopts.handle(),
-                    cf_handle.inner,
-                ),
-                db: PhantomData,
-            })
-        }
+        Ok(DBRawIterator::new(readopts, |opts| unsafe {
+            ffi::rocksdb_transaction_create_iterator_cf(self.inner, opts, cf_handle.inner)
+        }))
     }
 }
 
