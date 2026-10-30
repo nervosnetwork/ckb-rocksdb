@@ -1,0 +1,26 @@
+name: Publish dry run
+
+on:
+  push:
+    branches:
+      - test/publish-dry-run
+
+permissions:
+  contents: read
+
+jobs:
+  ckb-rocksdb:
+    name: ckb-rocksdb (dry run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install libclang
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+      - name: Check crate version
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "ckb-rocksdb") | .version')"
+          test "$version" = "0.21.2"
+      - name: Verify package (dry run)
+        run: cargo publish --dry-run
