@@ -19,6 +19,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ""
       - name: Install libclang
         run: sudo apt-get update && sudo apt-get install -y libclang-dev
       - name: Check tag matches crate version
@@ -43,6 +45,8 @@ jobs:
         with:
           submodules: true
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ""
       - name: Install libclang
         run: sudo apt-get update && sudo apt-get install -y libclang-dev
       - name: Check tag matches crate version
