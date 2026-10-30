@@ -1,0 +1,57 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "ckb-librocksdb-sys-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  ckb-rocksdb:
+    name: ckb-rocksdb
+    if: startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Check tag matches crate version
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "ckb-rocksdb") | .version')"
+          test "v${version}" = "${GITHUB_REF_NAME}"
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish ckb-rocksdb
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish
+
+  ckb-librocksdb-sys:
+    name: ckb-librocksdb-sys
+    if: startsWith(github.ref_name, 'ckb-librocksdb-sys-v')
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Check tag matches crate version
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 \
+            --manifest-path librocksdb-sys/Cargo.toml \
+            | jq -r '.packages[] | select(.name == "ckb-librocksdb-sys") | .version')"
+          test "ckb-librocksdb-sys-v${version}" = "${GITHUB_REF_NAME}"
+      - name: Check vendored RocksDB sources are present
+        run: cargo package --list --manifest-path librocksdb-sys/Cargo.toml | grep -q '^rocksdb/'
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish ckb-librocksdb-sys
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --manifest-path librocksdb-sys/Cargo.toml
