@@ -28,7 +28,6 @@ pub struct SstFileWriter<'a> {
 }
 
 unsafe impl Send for SstFileWriter<'_> {}
-unsafe impl Sync for SstFileWriter<'_> {}
 
 struct EnvOptions {
     inner: *mut ffi::rocksdb_envoptions_t,
@@ -67,7 +66,7 @@ impl<'a> SstFileWriter<'a> {
     }
 
     /// Prepare SstFileWriter to write into file located at "file_path".
-    pub fn open<P: AsRef<Path>>(&'a self, path: P) -> Result<(), Error> {
+    pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Error> {
         let cpath = to_cpath(
             &path,
             "Failed to convert path to CString when create SstFileWriter.",
@@ -75,7 +74,7 @@ impl<'a> SstFileWriter<'a> {
         self.open_raw(&cpath)
     }
 
-    fn open_raw(&'a self, cpath: &CString) -> Result<(), Error> {
+    fn open_raw(&mut self, cpath: &CString) -> Result<(), Error> {
         unsafe {
             ffi_try!(ffi::rocksdb_sstfilewriter_open(
                 self.inner,

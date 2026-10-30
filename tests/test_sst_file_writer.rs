@@ -35,3 +35,11 @@ fn sst_file_writer_works() {
         assert!(db.get(b"k3").unwrap().is_none());
     }
 }
+
+// FIXME: windows
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn sst_file_writer_cannot_be_shared_across_threads() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/fail/sst_file_writer/*.rs");
+}
