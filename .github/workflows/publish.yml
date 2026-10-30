@@ -51,8 +51,16 @@ jobs:
             --manifest-path librocksdb-sys/Cargo.toml \
             | jq -r '.packages[] | select(.name == "ckb-librocksdb-sys") | .version')"
           test "ckb-librocksdb-sys-v${version}" = "${GITHUB_REF_NAME}"
-      - name: Check vendored RocksDB sources are present
-        run: cargo package --list --manifest-path librocksdb-sys/Cargo.toml | grep -q '^rocksdb/'
+      - name: Check vendored sources are present
+        run: |
+          list="$(mktemp)"
+          cargo package --list --manifest-path librocksdb-sys/Cargo.toml > "$list"
+          for dir in rocksdb snappy lz4 zstd zlib bzip2; do
+            grep -q "^${dir}/" "$list" || {
+              echo "missing ${dir}/ in the packaged sys crate"
+              exit 1
+            }
+          done
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
       - name: Publish ckb-librocksdb-sys
